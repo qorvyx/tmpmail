@@ -449,7 +449,10 @@ config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
 - `read --html` writes a sanitized copy (no scripts, forms, frames; strict CSP) and
   **blocks remote images** (tracking pixels) unless you pass `--images` (then they load from
   the sender's servers, Guerrilla Mail's too, not through its proxy). These copies are
-  deleted after a day.
+  deleted after a day. They are written to `view/` in the state folder, readable only by
+  you (`0600` in a `0700` folder); when the browser is a snap (Firefox on Ubuntu and
+  Kubuntu), which can't read hidden folders in your home, to `~/snap/NAME/common/tmpmail-view/`
+  instead, the one place outside its sandbox it may always read.
 - Attachment names are sanitized so they can't escape the target directory, and
   existing files are never overwritten.
 - `tmpmail mcp` hands message contents to an AI agent. Anyone can mail a temp address, so

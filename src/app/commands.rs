@@ -413,8 +413,9 @@ impl App {
         };
         let doc = safe_html_document(&msg.subject, &html, images);
         let name = format!("{}.html", safe_filename(&msg.id, "message"));
-        let path = system::write_view_file(self.store.dir(), &name, &doc)?;
-        system::open(&path.to_string_lossy(), self.browser().as_deref())?;
+        let browser = self.browser();
+        let path = system::write_view(self.store.dir(), browser.as_deref(), &name, &doc)?;
+        system::open(&path.to_string_lossy(), browser.as_deref())?;
         Ok(path)
     }
 

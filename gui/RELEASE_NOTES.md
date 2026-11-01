@@ -36,6 +36,11 @@ what breaks:
 - **`j`/`k` keep the open message in view.** Past the last visible row the message opened
   but the list stayed put; it now scrolls just enough to show it. `[`/`]` do the same in
   the inbox list.
+- **A narrow message pane stays readable.** With the window tiled to half the screen, the
+  sender's name ran over the date and the links were cut to a letter or two. The message
+  list now gives way (down to 280 px) so the open message keeps 340 px where it can, the
+  sender's address and the date move to their own lines, and a link's address gets up to two
+  lines with its buttons under it.
 - **A refused label's reason is in view.** In a 1280×800 window the new inbox dialog
   scrolls, and the reason under the label field sat below its visible part; the dialog now
   scrolls to it.

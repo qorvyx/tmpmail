@@ -32,36 +32,45 @@
   }
 </script>
 
-<section class="flex h-full min-h-0 min-w-0 flex-col bg-raised" aria-label="Message">
+<section class="@container flex h-full min-h-0 min-w-0 flex-col bg-raised" aria-label="Message">
   {#if m && app.init}
     <div class="max-h-[58%] shrink-0 overflow-y-auto border-b border-rule">
       <header class="px-6 pt-5 pb-3">
         <h2 class="selectable text-xl leading-tight font-semibold tracking-[-0.02em] break-words">
           {m.subject || "(no subject)"}
         </h2>
-        <div class="mt-3 flex items-center gap-3">
+        <div class="mt-3 flex flex-wrap items-center gap-x-3 @sm:flex-nowrap">
           <span
             class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-sunken text-sm font-bold text-muted"
             aria-hidden="true">{senderName(m.from).trim().charAt(0).toUpperCase() || "?"}</span
           >
           <div class="min-w-0 flex-1">
-            <p class="flex min-w-0 items-baseline gap-2">
-              <span class="selectable truncate text-sm font-semibold" title={m.from}>{senderName(m.from)}</span>
-              {#if m.sender !== senderName(m.from)}
-                <span class="selectable truncate text-xs text-muted">{m.sender}</span>
-              {/if}
-              <button
-                class="shrink-0 self-center text-faint hover:text-ink"
-                title="Copy the sender's address"
-                aria-label="Copy the sender's address"
-                onclick={() => app.copyFromMessage("sender")}><Icon name="copy" size={13} /></button
-              >
+            <!-- A narrow pane: the address (with its copy button) wraps
+                 under the name instead of both being cut to a few letters. -->
+            <p class="flex min-w-0 flex-wrap items-baseline gap-x-2 @sm:flex-nowrap">
+              <span class="selectable max-w-full truncate text-sm font-semibold" title={m.from}>{senderName(m.from)}</span>
+              <span class="flex min-w-0 max-w-full items-baseline gap-2">
+                {#if m.sender !== senderName(m.from)}
+                  <span class="selectable truncate text-xs text-muted">{m.sender}</span>
+                {/if}
+                <button
+                  class="shrink-0 self-center text-faint hover:text-ink"
+                  title="Copy the sender's address"
+                  aria-label="Copy the sender's address"
+                  onclick={() => app.copyFromMessage("sender")}><Icon name="copy" size={13} /></button
+                >
+              </span>
             </p>
             <p class="truncate text-2xs text-muted" title={m.to.join(", ")}>
               To {m.to.join(", ") || inbox?.address}
             </p>
           </div>
-          <time class="shrink-0 self-start text-2xs text-muted" datetime={m.date ?? undefined}>{when(m.date)}</time>
+          <!-- A narrow pane: the date gets a line of its own, under the
+               sender, instead of squeezing the sender's line. -->
+          <time
+            class="basis-full truncate pl-12 text-2xs text-muted @sm:basis-auto @sm:shrink-0 @sm:self-start @sm:pl-0"
+            datetime={m.date ?? undefined}>{when(m.date)}</time
+          >
         </div>
 
         <div class="mt-3 -ml-2.5 flex flex-wrap items-center gap-1" role="toolbar" aria-label="Message view">
@@ -124,10 +133,14 @@
           <ul class="divide-y divide-rule overflow-hidden rounded-lg border border-rule">
             {#each links as link, i (link)}
               {@const p = parts(link)}
-              <li class={["flex items-center gap-3 px-3 py-2", i === 0 && "bg-sunken"]}>
-                <Icon name="link" size={14} class="text-faint" />
-                <span class="selectable min-w-0 flex-1 truncate text-xs" title={link}>
-                  <span class="font-semibold">{p.host}</span><span class="text-muted">{p.rest}</span>
+              <!-- A narrow pane: the address takes the whole first line (two
+                   at most, broken anywhere) and the buttons go under it. -->
+              <li class={["flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5 px-3 py-2 @sm:flex-nowrap", i === 0 && "bg-sunken"]}>
+                <span class="flex min-w-0 basis-full items-start gap-3 @sm:flex-1 @sm:basis-auto">
+                  <Icon name="link" size={14} class="mt-0.5 shrink-0 text-faint" />
+                  <span class="selectable line-clamp-2 min-w-0 flex-1 text-xs break-all @sm:line-clamp-1" title={link}>
+                    <span class="font-semibold">{p.host}</span><span class="text-muted">{p.rest}</span>
+                  </span>
                 </span>
                 <button class={["btn !h-7", i === 0 && "btn-primary"]} onclick={() => app.openLink(i)} title="Open in your browser">
                   <Icon name="external" size={13} />Open

@@ -115,6 +115,11 @@ preview on `gui-v*` tags; install steps are in the [main README](../README.md#de
   screen gets 1184×672). Wayland has no primary screen either: the window then fits the
   narrowest and shortest screen, and the compositor places it.
   Every dialog fits the window: its body scrolls while the title and buttons stay in view.
+  In a narrow window (the minimum is 900×560, less on a smaller screen) the message list is
+  drawn narrower than its saved width, down to 280 px, so the open message keeps 340 px
+  where the sidebar leaves room; in a narrow message pane the sender's address and the date
+  get lines of their own, and each link's address takes up to two lines with Open and Copy
+  under it.
 
 What each provider allows decides what's shown: Delete (message) is hidden for DropMail and
 tempmail.lol; Attachments for tempmail.lol and Maildrop; the domain picker for tempmail.lol

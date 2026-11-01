@@ -35,6 +35,16 @@
     }
   });
 
+  // In a narrow window the message list is drawn narrower than its saved
+  // width (not below LIST_MIN), so the open message keeps MESSAGE_MIN; the
+  // saved width comes back when the window grows.
+  const LIST_MIN = 280;
+  const LIST_MAX = 560;
+  const MESSAGE_MIN = 340;
+  let windowWidth = $state(window.innerWidth);
+  const room = $derived(windowWidth - sidebar - MESSAGE_MIN);
+  const listShown = $derived(Math.max(LIST_MIN, Math.min(list, room)));
+
   let search = $state<HTMLInputElement>();
 
   onMount(() => app.listen());
@@ -116,7 +126,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onkey} />
+<svelte:window onkeydown={onkey} bind:innerWidth={windowWidth} />
 
 {#if app.startError}
   <main class="grid h-full place-items-center p-8">
@@ -133,7 +143,9 @@
 {:else if app.init?.probe}
   <ProbeView origin={app.init.origin} plan={app.init.probe} />
 {:else}
-  <div class="grid h-full" style:grid-template-columns="{sidebar}px {list}px minmax(0,1fr)">
+  <!-- The message list gives way (down to its minimum) so the open message
+       keeps MESSAGE_MIN where it can in a narrow window. -->
+  <div class="grid h-full" style:grid-template-columns="{sidebar}px {listShown}px minmax(0,1fr)">
     <div class="relative min-h-0">
       <Sidebar />
       <Resizer bind:width={sidebar} min={200} max={360} label="Resize the inbox list" />
@@ -143,7 +155,12 @@
     {:else}
       <div class="relative min-h-0">
         <MessageList bind:search />
-        <Resizer bind:width={list} min={280} max={560} label="Resize the message list" />
+        <Resizer
+          bind:width={() => listShown, (w) => (list = w)}
+          min={LIST_MIN}
+          max={Math.max(LIST_MIN, Math.min(LIST_MAX, room))}
+          label="Resize the message list"
+        />
       </div>
       <MessageView />
     {/if}

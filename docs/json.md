@@ -101,5 +101,6 @@ only report whole kilobytes, so their sizes are rounded up to a multiple of 1024
 | `delete` | `{"deleted": N}` |
 | `drop` | `{"dropped": "address", "active": "address or null"}` |
 | `copy` | `{"copied": "address"}` |
+| `qr` | `{"address": "address"}` (no drawing) |
 | `domains` | `{"provider", "domains": [...]}` |
 | `providers` | `[{"id", "name", "website", "in_fallback_order", "capabilities": {...}, "status": {"ok", "ms"} \| {"ok": false, "error"} \| null}]` |

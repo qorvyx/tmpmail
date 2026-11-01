@@ -335,14 +335,14 @@ Deleting messages works on mail.tm, mail.gw, Guerrilla Mail and Maildrop.
 
 ## Providers
 
-| Provider | Lifetime | [Username](#choose-the-username) | [Domain](#pick-a-domain) | [Attachments](#attachments) | [Push](#live-push) | [Delete](#clean-up) | [Log back in](#log-back-in) |
-|---|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| [mail.tm](https://mail.tm) `mailtm` | until deleted; mail kept 7 days | ✓ | ✓ | ✓ | ✓ | ✓ | password |
-| [DropMail.me](https://dropmail.me) `dropmail` | renewed while used | | ✓ | ✓ | ✓ | | automatic |
-| [Guerrilla Mail](https://www.guerrillamail.com) `guerrilla` | mail kept 60 min | ✓ | ✓ | ✓ | | ✓ | automatic |
-| [tempmail.lol](https://tempmail.lol) `tempmail_lol` | 1 hour | | | | | | |
-| [mail.gw](https://mail.gw) `mailgw` | until deleted; mail kept 7 days | ✓ | ✓ | ✓ | | ✓ | password |
-| [Maildrop](https://maildrop.cc) `maildrop` | 24 h without mail | ✓ | | | | ✓ | by name |
+| Provider | Lifetime | [Username](#choose-the-username) | [Domain](#pick-a-domain) | [Attachments](#attachments) | [Push](#live-push) | [Delete](#clean-up) | Raw source (`read --raw`) | [Log back in](#log-back-in) |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| [mail.tm](https://mail.tm) `mailtm` | until deleted; mail kept 7 days | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | password |
+| [DropMail.me](https://dropmail.me) `dropmail` | renewed while used | | ✓ | ✓ | ✓ | | ✓ | automatic |
+| [Guerrilla Mail](https://www.guerrillamail.com) `guerrilla` | mail kept 60 min | ✓ | ✓ | ✓ | | ✓ | | automatic |
+| [tempmail.lol](https://tempmail.lol) `tempmail_lol` | 1 hour | | | | | | | |
+| [mail.gw](https://mail.gw) `mailgw` | until deleted; mail kept 7 days | ✓ | ✓ | ✓ | | ✓ | ✓ | password |
+| [Maildrop](https://maildrop.cc) `maildrop` | 24 h without mail | ✓ | | | | ✓ | ✓ | by name |
 
 - **Maildrop is public**: anyone who guesses the name can read the inbox. It is never used
   unless you ask for it with `-p maildrop`, and its first mail may be delayed by greylisting.

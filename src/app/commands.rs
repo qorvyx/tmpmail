@@ -184,6 +184,7 @@ impl App {
 
         let total = sections.len();
         for (k, (address, created, result)) in sections.into_iter().enumerate() {
+            let inbox = self.state.position(&address).map(|n| self.inbox_option(n));
             if k > 0 {
                 println!();
             }
@@ -204,7 +205,10 @@ impl App {
             match result {
                 Ok(list) if list.is_empty() => {
                     if !self.global.quiet {
-                        println!("No messages yet. `tmpmail wait` blocks until one arrives.");
+                        println!(
+                            "No messages yet. `tmpmail {}wait` blocks until one arrives.",
+                            inbox.unwrap_or_default()
+                        );
                     }
                 }
                 Ok(list) => self.print_list(&list),
@@ -273,7 +277,7 @@ impl App {
             self.json_out(&msg);
             return Ok(());
         }
-        let text = self.render_message(&msg);
+        let text = self.render_message(&msg, n);
         let rows = system::term_size().map_or(0, |(_, rows)| rows);
         // Leave a row for the shell prompt.
         let fits = rows == 0 || text.lines().count() < rows;
@@ -283,29 +287,52 @@ impl App {
             self.warn(&format!("pager failed ({e:#}), printing instead"));
             print!("{text}");
         }
-        self.note_html_version(&msg);
+        self.note_html_version(&msg, n);
         Ok(())
     }
 
-    fn print_message(&self, msg: &Message) {
+    /// Message `msg` of inbox `n`, as text.
+    fn print_message(&self, msg: &Message, n: usize) {
         if self.global.json {
             self.json_out(msg);
             return;
         }
-        print!("{}", self.render_message(msg));
-        self.note_html_version(msg);
+        print!("{}", self.render_message(msg, n));
+        self.note_html_version(msg, n);
     }
 
-    fn note_html_version(&self, msg: &Message) {
+    fn note_html_version(&self, msg: &Message, n: usize) {
         if msg.html.is_some() && !self.global.quiet {
             // The note goes to stderr; keep it after the body when piped.
             let _ = std::io::stdout().flush();
-            self.note(&format!("\n(HTML version: tmpmail read {} --html)", msg.id));
+            self.note(&format!(
+                "\n(HTML version: tmpmail {}read {} --html)",
+                self.inbox_option(n),
+                clean_line(&msg.id)
+            ));
         }
     }
 
-    /// Headers and text body, ready to print or page.
-    fn render_message(&self, msg: &Message) -> String {
+    /// `-i ADDRESS ` when inbox `n` isn't the one commands use by default
+    /// (it came from `-i`, `TMPMAIL_INBOX` or `-a`), so a printed hint
+    /// names it; else nothing.
+    fn inbox_option(&self, n: usize) -> String {
+        if self.state.resolve(None).is_ok_and(|d| d == n) {
+            String::new()
+        } else {
+            let address = clean_line(&self.state.inboxes[n].address);
+            let plain = |c: char| c.is_ascii_alphanumeric() || "@._+-".contains(c);
+            if address.chars().all(plain) {
+                format!("-i {address} ")
+            } else {
+                format!("-i '{}' ", address.replace('\'', r"'\''"))
+            }
+        }
+    }
+
+    /// Headers and text body of message `msg` of inbox `n`, ready to print
+    /// or page.
+    fn render_message(&self, msg: &Message, n: usize) -> String {
         let width = term_width().min(100);
         let mut out = String::new();
         let mut header = |k: &str, v: String| {
@@ -328,7 +355,11 @@ impl App {
                 format!(
                     "{} {}",
                     self.yellow(&clean_line(&names.join(", "))),
-                    self.dim(&format!("(tmpmail save {})", clean_line(&msg.id)))
+                    self.dim(&format!(
+                        "(tmpmail {}save {})",
+                        self.inbox_option(n),
+                        clean_line(&msg.id)
+                    ))
                 ),
             );
         }
@@ -387,7 +418,7 @@ impl App {
             v["inbox"] = json!(inbox);
             self.json_out(&v);
         } else {
-            self.print_message(&msg);
+            self.print_message(&msg, n);
         }
         if a.delete {
             let id = msg.id.clone();
@@ -926,6 +957,10 @@ impl App {
 
     fn qr(&mut self) -> Result<()> {
         let address = self.current()?.address.clone();
+        if self.global.json {
+            self.json_out(&json!({ "address": address }));
+            return Ok(());
+        }
         let code = qrcode::QrCode::new(address.as_bytes()).map_err(|e| anyhow::anyhow!("{e}"))?;
         let art = code
             .render::<qrcode::render::unicode::Dense1x2>()
@@ -1125,6 +1160,7 @@ impl App {
                 (caps.custom_user, "custom-user"),
                 (caps.choose_domain, "domain"),
                 (caps.attachments, "attachments"),
+                (caps.raw, "raw"),
                 (caps.delete_message, "delete"),
                 (caps.login, "login"),
             ]
@@ -1473,6 +1509,39 @@ mod tests {
         assert!(app.run(Command::Wait(wait)).is_err());
         // main prints no `{"error": ...}` after the code's document.
         assert!(app.error_shown());
+    }
+
+    #[test]
+    fn hints_name_an_inbox_that_isnt_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_with(
+            dir.path(),
+            Fixed {
+                mail: Vec::new(),
+                deletes: false,
+            },
+        );
+        let other = Inbox::new("fake", "b@x.com".into(), Value::Null);
+        app.state = app.store.update(|s| s.add(other)).unwrap().0;
+        // b@x.com is active now; a@x.com came from -i.
+        assert_eq!(app.inbox_option(1), "");
+        assert_eq!(app.inbox_option(0), "-i a@x.com ");
+        app.state.inboxes[0].address = "o'k$@x.com".into();
+        assert_eq!(app.inbox_option(0), r"-i 'o'\''k$@x.com' ");
+        app.state.inboxes[0].address = "a@x.com".into();
+        let msg = Message {
+            id: "m1".into(),
+            attachments: vec![crate::provider::Attachment {
+                filename: "f.txt".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(
+            app.render_message(&msg, 0)
+                .contains("(tmpmail -i a@x.com save m1)")
+        );
+        assert!(app.render_message(&msg, 1).contains("(tmpmail save m1)"));
     }
 
     #[test]

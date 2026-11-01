@@ -98,6 +98,8 @@ when the provider marks it read itself.
 ### `read`: show a message
 
 Prints the headers and body as text. Alias: `show`. Old flags: `-r` (newest), `tmpmail ID`.
+The hints it prints (`tmpmail save ID`, `tmpmail read ID --html`) include `-i ADDRESS` when
+the inbox isn't the active one (picked with `-i`, `TMPMAIL_INBOX`, or `wait -a`).
 
 | Option | Short | Explanation |
 |---|---|---|
@@ -105,7 +107,7 @@ Prints the headers and body as text. Alias: `show`. Old flags: `-r` (newest), `t
 | `--recent` | `-r` | Explicitly the newest message. |
 | `--html` | | Open the HTML version in your browser. It is sanitized first: no scripts, forms or frames, links can't track you back. |
 | `--images` | | With `--html`: also load remote images. Off by default because they are often tracking pixels that tell the sender you opened the mail. |
-| `--raw` | | Print the full raw email source (headers + MIME). Useful for debugging or `> mail.eml`. |
+| `--raw` | | Print the full raw email source (headers + MIME). Useful for debugging or `> mail.eml`. Supported by mail.tm, mail.gw, DropMail and Maildrop; Guerrilla and tempmail.lol don't offer it (exit 64). `providers` shows it as `raw`. |
 | `--no-pager` | | Print a long message straight to the terminal. By default a message taller than the terminal opens in a pager: `pager` from the config, else `$PAGER`, else `less`. On Windows, if neither is set and `less` isn't installed, the message is printed instead. |
 
 ### `wait`: wait for a message
@@ -256,6 +258,7 @@ Copies the active address to the clipboard. Old flag: `-c`.
 ### `qr`: QR code
 
 Draws the active address as a QR code in the terminal, so you can scan it with your phone.
+With `--json` it prints `{"address": ...}` instead of the drawing.
 
 ### `domains`: list domains
 
@@ -317,6 +320,7 @@ by `new`). It also shows what each one supports:
 - `custom-user`: you can choose the part before `@` (`new -u`)
 - `domain`: you can choose the domain (`new -d`)
 - `attachments`
+- `raw`: `read --raw` can print the message's source
 - `delete`: messages can be deleted
 - `login`: an existing inbox can be attached with `login`
 - how long addresses live

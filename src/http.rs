@@ -26,6 +26,7 @@ pub(crate) fn set_timeout(secs: Option<u64>) {
 /// Seconds per request: the environment, else the config, else 20.
 fn timeout_secs(env: Option<&str>, configured: u64) -> u64 {
     env.and_then(|v| v.parse().ok())
+        .filter(|&secs| secs > 0)
         .or((configured > 0).then_some(configured))
         .unwrap_or(crate::config::DEFAULT_HTTP_TIMEOUT)
 }
@@ -313,8 +314,10 @@ mod tests {
         assert_eq!(timeout_secs(None, 0), 20);
         assert_eq!(timeout_secs(None, 45), 45);
         assert_eq!(timeout_secs(Some("7"), 45), 7);
-        // An unreadable variable is ignored, as before.
+        // `Config::load` refuses these; a lib user that skips it gets the
+        // config's value, not a timeout of 0.
         assert_eq!(timeout_secs(Some("soon"), 45), 45);
         assert_eq!(timeout_secs(Some("soon"), 0), 20);
+        assert_eq!(timeout_secs(Some("0"), 45), 45);
     }
 }

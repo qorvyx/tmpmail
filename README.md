@@ -424,11 +424,13 @@ http_timeout = 20                     # seconds per request to a provider (new i
 
 A key tmpmail doesn't know (a typo, or one from a newer version) is ignored with a warning
 on stderr (`-q` and `--json` silence it): tmpmail 0.2.0 and earlier refuse unknown config
-keys; 0.3.0 and later warn. A known key with a bad value is still an error.
+keys; 0.3.0 and later warn. A known key with a bad value is still an error, and so is
+`providers = []` (leave the key out for the default order).
 
 Environment: `TMPMAIL_PROVIDER` (comma list), `TMPMAIL_TIMEOUT`, `TMPMAIL_POLL_INTERVAL`,
 `TMPMAIL_PUSH`, `TMPMAIL_HTTP_TIMEOUT`, `TMPMAIL_INBOX`, `TMPMAIL_PASSWORD`, `TMPMAIL_STATE_DIR`,
-`TMPMAIL_DROPMAIL_TOKEN`, `PAGER`, `NO_COLOR`.
+`TMPMAIL_DROPMAIL_TOKEN`, `PAGER`, `NO_COLOR`. The number variables are checked like their
+config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
 
 </details>
 

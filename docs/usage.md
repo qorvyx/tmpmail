@@ -289,7 +289,7 @@ Adds an account you already have, e.g. one created on the mail.tm website or on 
 |---|---|---|
 | `ADDRESS` | | The full address. |
 | `--password PW` | | Its password (required for mail.tm/mail.gw). Also `TMPMAIL_PASSWORD`. |
-| `--provider ID` | `-p` | `mailtm` (default), `mailgw`, or `maildrop` (chosen automatically for `@maildrop.cc`; no password needed). |
+| `--provider ID` | `-p` | `mailtm` (default), `mailgw`, or `maildrop` (chosen automatically for `@maildrop.cc`; no password needed, and the same warning as `new` that its inboxes are public). |
 | `--label NAME` | `-l` | A nickname, as in `new`. Without it, logging in again to a stored address keeps its label. |
 
 ### `drop`: delete an inbox
@@ -442,7 +442,7 @@ These still work when used as the **first** argument, so old scripts keep runnin
 | `TMPMAIL_DROPMAIL_TOKEN` | Your own DropMail API token, if DropMail asks for a captcha. |
 | `TMPMAIL_PUSH` | `0` turns off push in `wait`/`watch` (see [`wait`](#wait-wait-for-a-message)). Default `1`. |
 | `PAGER` | Pager for long messages in `read`, unless `pager` is set in the config. Default `less` (on Windows, printing directly when `less` isn't installed). |
-| `TMPMAIL_HTTP_TIMEOUT` | Seconds before a single request to a provider gives up. Default 20, or `http_timeout` in the config file (new in 0.3.0). |
+| `TMPMAIL_HTTP_TIMEOUT` | Seconds before a single request to a provider gives up. Default 20, or `http_timeout` in the config file (new in 0.3.0). Like `http_timeout`, it must be a whole number from 1 to 86400; anything else is a usage error (exit 64). |
 | `NO_COLOR` | Disable colors. |
 
 ## Exit codes

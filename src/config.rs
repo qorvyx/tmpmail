@@ -14,6 +14,9 @@ use crate::provider;
 pub const DEFAULT_POLL_INTERVAL: u64 = 5;
 /// Seconds before a request gives up when nothing sets it.
 pub const DEFAULT_HTTP_TIMEOUT: u64 = 20;
+/// The longest request timeout accepted (a day): far more would overflow
+/// the clock arithmetic of a request's deadline.
+const MAX_HTTP_TIMEOUT: u64 = 86_400;
 
 /// tmpmail's settings: the config file plus environment overrides.
 ///
@@ -24,7 +27,7 @@ pub const DEFAULT_HTTP_TIMEOUT: u64 = 20;
 /// Fields can be added in any release, so the struct is `#[non_exhaustive]`:
 /// read one with [`Config::load`] (or [`Config::parse`]), or build one with
 /// `Config::default()` and then set fields. Fields set by hand skip the
-/// checks `load` makes (provider ids, `http_timeout` of at least 1).
+/// checks `load` makes (provider ids, `http_timeout` from 1 to 86400).
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 #[non_exhaustive]
@@ -99,15 +102,17 @@ impl Config {
             });
         }
         if let Some(ids) = &cfg.providers {
-            for id in ids {
-                provider::get(id)?;
-            }
+            check_providers(ids)?;
         }
-        if cfg.http_timeout == Some(0) {
-            return Err(Error::Usage(
-                "http_timeout in the config must be at least 1 second".into(),
-            ));
+        if let Some(t) = cfg.http_timeout {
+            check_http_timeout(t, "http_timeout in the config")?;
         }
+        // Checked like the config's key, and wins over it.
+        if let Some(t) = env_u64("TMPMAIL_HTTP_TIMEOUT")? {
+            check_http_timeout(t, "TMPMAIL_HTTP_TIMEOUT")?;
+            cfg.http_timeout = Some(t);
+        }
+
         Ok(cfg)
     }
 
@@ -168,6 +173,30 @@ impl Config {
     }
 }
 
+/// The provider order: known ids, and at least one (`providers = []`
+/// would quietly mean the default order).
+fn check_providers(ids: &[String]) -> Result<()> {
+    if ids.is_empty() {
+        return Err(Error::Usage(
+            "providers in the config is empty; list at least one provider, or remove the key for the default order".into(),
+        ));
+    }
+    for id in ids {
+        provider::get(id)?;
+    }
+    Ok(())
+}
+
+fn check_http_timeout(secs: u64, what: &str) -> Result<()> {
+    if (1..=MAX_HTTP_TIMEOUT).contains(&secs) {
+        Ok(())
+    } else {
+        Err(Error::Usage(format!(
+            "{what} must be from 1 to {MAX_HTTP_TIMEOUT} seconds, got {secs}"
+        )))
+    }
+}
+
 fn env_u64(key: &str) -> Result<Option<u64>> {
     match std::env::var(key) {
         Ok(v) => v
@@ -217,6 +246,20 @@ mod tests {
         }
         let err = Config::parse("http_timeout = \"x\"\nfoo = 1\n").unwrap_err();
         assert!(err.to_string().contains("line 1"), "{err}");
+    }
+
+    #[test]
+    fn an_empty_provider_list_is_refused() {
+        assert!(check_providers(&[]).is_err());
+        assert!(check_providers(&["mailtm".into()]).is_ok());
+        assert!(check_providers(&["nope".into()]).is_err());
+    }
+
+    #[test]
+    fn http_timeouts_are_bounded() {
+        assert!(check_http_timeout(20, "x").is_ok());
+        assert!(check_http_timeout(0, "x").is_err());
+        assert!(check_http_timeout(u64::MAX, "x").is_err());
     }
 
     #[test]

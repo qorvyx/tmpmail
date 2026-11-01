@@ -94,6 +94,16 @@ impl App {
         }
     }
 
+    /// Warns that anyone can read an inbox at `p` (Maildrop).
+    fn warn_if_public(&self, p: &dyn Provider) {
+        if !p.caps().private {
+            self.warn(&format!(
+                "warning: {} inboxes are public, anyone who knows this address can read its mail",
+                p.name()
+            ));
+        }
+    }
+
     // ---------- commands ----------
 
     fn new_inbox(&mut self, a: NewArgs) -> Result<()> {
@@ -122,12 +132,7 @@ impl App {
         let p = provider::get(&inbox.provider)?;
         let copied = self.activate(&inbox, a.copy)?;
         if !self.global.json {
-            if !p.caps().private {
-                self.warn(&format!(
-                    "warning: {} inboxes are public, anyone who knows this address can read its mail",
-                    p.name()
-                ));
-            }
+            self.warn_if_public(p.as_ref());
             let mut info = format!("via {} ({})", p.name(), p.caps().lifetime);
             if copied {
                 info.push_str(", copied to clipboard");
@@ -1085,7 +1090,11 @@ impl App {
             let n = self.state.position(&inbox.address)?;
             self.state.inboxes[n].label.clone()
         });
-        self.activate(&inbox, false).map(|_| ())
+        self.activate(&inbox, false)?;
+        if !self.global.json {
+            self.warn_if_public(p.as_ref());
+        }
+        Ok(())
     }
 
     fn drop_inbox(&mut self, a: DropArgs) -> Result<()> {
@@ -1542,6 +1551,23 @@ mod tests {
                 .contains("(tmpmail -i a@x.com save m1)")
         );
         assert!(app.render_message(&msg, 1).contains("(tmpmail save m1)"));
+    }
+
+    #[test]
+    fn a_maildrop_login_warns_that_the_inbox_is_public() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_test(dir.path().to_path_buf());
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.log_to(tx);
+        let login = LoginArgs {
+            address: "c1md18730@maildrop.cc".into(),
+            password: None,
+            provider: None,
+            label: None,
+        };
+        app.run(Command::Login(login)).unwrap();
+        let said: Vec<String> = rx.try_iter().collect();
+        assert!(said.iter().any(|w| w.contains("public")), "{said:?}");
     }
 
     #[test]

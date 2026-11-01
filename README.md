@@ -9,7 +9,7 @@ get the verification code back in one line of shell. When one provider is down, 
 [![CI](https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml/badge.svg)](https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml)
 [![Providers](https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml/badge.svg)](https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml)
 [![Release](https://img.shields.io/github/v/release/qorvyx/tmpmail)](https://github.com/qorvyx/tmpmail/releases/latest)
-[![crates.io](https://img.shields.io/badge/crates.io-v0.3.2-orange)](https://crates.io/crates/tmpmail)
+[![crates.io](https://img.shields.io/crates/v/tmpmail)](https://crates.io/crates/tmpmail)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
 ```sh
@@ -47,7 +47,7 @@ runtime linked in, so no Visual C++ Redistributable needed since 0.3.1). Each re
 from this repository by the release workflow:
 
 ```sh
-gh attestation verify tmpmail-0.3.2-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail
+gh attestation verify tmpmail-0.3.3-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail
 ```
 
 Nothing else is needed at runtime. Optional extras: `wl-copy`, `xclip`, `xsel` or `pbcopy`
@@ -83,8 +83,8 @@ one that has arrived. In GitHub Actions:
 - name: Install tmpmail
   run: |
     mkdir -p ~/.local/bin
-    curl -sSfL https://github.com/qorvyx/tmpmail/releases/download/v0.3.2/tmpmail-0.3.2-x86_64-unknown-linux-musl.tar.gz \
-      | tar xz --strip-components=1 -C ~/.local/bin tmpmail-0.3.2-x86_64-unknown-linux-musl/tmpmail
+    curl -sSfL https://github.com/qorvyx/tmpmail/releases/download/v0.3.3/tmpmail-0.3.3-x86_64-unknown-linux-musl.tar.gz \
+      | tar xz --strip-components=1 -C ~/.local/bin tmpmail-0.3.3-x86_64-unknown-linux-musl/tmpmail
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 - name: Sign-up test

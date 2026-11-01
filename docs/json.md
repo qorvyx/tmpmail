@@ -98,8 +98,6 @@ only report whole kilobytes, so their sizes are rounded up to a multiple of 1024
 |---|---|
 | `otp` | `{"code", "candidates": [{"code", "score"}], "inbox", "message_id", "from", "subject"}` |
 | `wait --otp` | `{"code", "candidates": [{"code", "score"}], "inbox", "message_id", "from", "subject"}` |
-
-`candidates` lists the heuristic matches; it is empty when `--regex` / `--otp-regex` picked the code.
 | `wait --link` | `{"link", "inbox", "message_id"}` |
 | `links` | `{"links": [...], "message_id"}` |
 | `attachments` | `{"message_id", "attachments": [...]}` |
@@ -110,3 +108,5 @@ only report whole kilobytes, so their sizes are rounded up to a multiple of 1024
 | `qr` | `{"address": "address"}` (no drawing) |
 | `domains` | `{"provider", "domains": [...]}` |
 | `providers` | `[{"id", "name", "website", "in_fallback_order", "capabilities": {...}, "status": {"ok", "ms"} \| {"ok": false, "error"} \| null}]` |
+
+`candidates` lists the heuristic matches; it is empty when `--regex` / `--otp-regex` picked the code.

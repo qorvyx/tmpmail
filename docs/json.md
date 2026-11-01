@@ -64,6 +64,9 @@ with the receiving address. With `--rotate`, each switch to a new address prints
 ## Message: `read`, and `wait` without `--otp` or `--link`
 
 `wait` adds an `"inbox"` field with the receiving address (useful with `--all-inboxes`).
+It prints exactly one document: `wait --delete` on a provider that can't delete messages is
+refused with an `unsupported` error before waiting, and when a delete fails after the message
+was printed, the failure goes to stderr (no `error` document follows) and sets the exit code.
 
 ```json
 {

@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::error::unsupported;
+
 use super::*;
 use crate::cli::*;
 
@@ -357,7 +359,7 @@ impl App {
         let otp_re = a.otp_regex.as_deref().map(compile_plain).transpose()?;
         let (want_otp, want_link) = (a.otp, a.link);
         // `Some(found)` accepts the message; `found` is the code or link asked for.
-        let (n, msg, text, found) = self.wait_for(&a.filter, |m, body| {
+        let (n, msg, text, found) = self.wait_for_where(&a.filter, a.delete, |m, body| {
             if want_otp {
                 extract::otp(&m.subject, body, otp_re.as_ref()).map(Some)
             } else if want_link {
@@ -389,7 +391,15 @@ impl App {
         }
         if a.delete {
             let id = msg.id.clone();
-            self.with_inbox_at(n, |p, inbox| p.delete_message(inbox, &id))?;
+            // The message is out, so the failure is told on stderr only:
+            // `--json` keeps one document on stdout, and the exit code
+            // still says the message is left in the inbox.
+            if let Err(e) = self.with_inbox_at(n, |p, inbox| p.delete_message(inbox, &id)) {
+                let _ = std::io::stdout().flush();
+                self.warn(&format!("could not delete the message: {e}"));
+                self.error_shown = true;
+                return Err(e);
+            }
         }
         Ok(())
     }
@@ -425,6 +435,18 @@ impl App {
         f: &WaitFilter,
         accept: impl Fn(&Message, &str) -> Option<T>,
     ) -> Result<(usize, Message, String, T)> {
+        self.wait_for_where(f, false, accept)
+    }
+
+    /// [`App::wait_for`]; with `deleting` only on inboxes whose provider can
+    /// delete messages (`wait --delete`), checked before waiting. With
+    /// `--all-inboxes` the others are skipped with a note.
+    fn wait_for_where<T>(
+        &mut self,
+        f: &WaitFilter,
+        deleting: bool,
+        accept: impl Fn(&Message, &str) -> Option<T>,
+    ) -> Result<(usize, Message, String, T)> {
         let from = f.from.as_deref().map(compile).transpose()?;
         let subject = f.subject.as_deref().map(compile).transpose()?;
         let body = f.body.as_deref().map(compile).transpose()?;
@@ -433,6 +455,29 @@ impl App {
         let deadline = Instant::now() + Duration::from_secs(timeout);
         let all = f.all_inboxes;
         let mut targets = self.targets(all)?;
+        if deleting {
+            let mut refused = None;
+            for n in targets.clone() {
+                let inbox = &self.state.inboxes[n];
+                let (id, address) = (inbox.provider.clone(), inbox.address.clone());
+                let can = match self.provider(&id) {
+                    Ok(p) => p.caps().delete_message,
+                    Err(e) if !all => return Err(e),
+                    Err(_) => false,
+                };
+                if !can {
+                    let e = unsupported(&id, &format!("deleting messages (--delete, {address})"));
+                    if all {
+                        self.note(&format!("skipping {address}: {e}"));
+                    }
+                    targets.retain(|&t| t != n);
+                    refused.get_or_insert(e);
+                }
+            }
+            if let (true, Some(e)) = (targets.is_empty(), refused) {
+                return Err(e);
+            }
+        }
 
         // Keyed by (inbox, message id): ids are only unique per inbox.
         let mut seen: HashSet<(usize, String)> = HashSet::new();
@@ -1194,6 +1239,8 @@ mod tests {
     /// A provider whose inbox holds `mail` (id, subject, minute it came in).
     struct Fixed {
         mail: Vec<(&'static str, &'static str, u32)>,
+        /// Claims to delete messages, though deleting one always fails.
+        deletes: bool,
     }
 
     impl Fixed {
@@ -1227,7 +1274,7 @@ mod tests {
                 choose_domain: false,
                 attachments: false,
                 raw: false,
-                delete_message: false,
+                delete_message: self.deletes,
                 delete_inbox: false,
                 login: false,
                 lifetime: "",
@@ -1272,6 +1319,7 @@ mod tests {
                     ("other", "Newsletter", 30),
                     ("new", "Your code is 333444", 20),
                 ],
+                deletes: false,
             },
         );
         let filter = WaitFilter {
@@ -1288,7 +1336,13 @@ mod tests {
     #[test]
     fn new_and_login_refuse_a_taken_label_before_any_request() {
         let dir = tempfile::tempdir().unwrap();
-        let mut app = app_with(dir.path(), Fixed { mail: Vec::new() });
+        let mut app = app_with(
+            dir.path(),
+            Fixed {
+                mail: Vec::new(),
+                deletes: false,
+            },
+        );
         app.state = app
             .store
             .update(|s| s.inboxes[0].label = Some("mt1".into()))
@@ -1340,7 +1394,13 @@ mod tests {
     fn rotate_stores_the_new_inbox_before_dropping_the_old() {
         for keep in [false, true] {
             let dir = tempfile::tempdir().unwrap();
-            let mut app = app_with(dir.path(), Fixed { mail: Vec::new() });
+            let mut app = app_with(
+                dir.path(),
+                Fixed {
+                    mail: Vec::new(),
+                    deletes: false,
+                },
+            );
             app.state = app
                 .store
                 .update(|s| s.inboxes[0].label = Some("work".into()))
@@ -1357,6 +1417,62 @@ mod tests {
             );
             assert_eq!(s.position("a@x.com").is_some(), keep);
         }
+    }
+
+    #[test]
+    fn wait_delete_is_refused_before_waiting_where_deleting_is_unsupported() {
+        let dir = tempfile::tempdir().unwrap();
+        // Nothing there matches: the wait itself would time out.
+        let mut app = app_with(
+            dir.path(),
+            Fixed {
+                mail: vec![("1", "Newsletter", 1)],
+                deletes: false,
+            },
+        );
+        let wait = WaitArgs {
+            filter: WaitFilter {
+                include_existing: true,
+                timeout: Some(3),
+                ..Default::default()
+            },
+            otp: true,
+            link: false,
+            otp_regex: None,
+            delete: true,
+        };
+        let start = Instant::now();
+        let err = app.run(Command::Wait(wait)).unwrap_err();
+        assert!(matches!(err, Error::Unsupported { .. }), "{err}");
+        assert!(err.to_string().contains("a@x.com"), "{err}");
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_failed_delete_after_wait_prints_one_document_and_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_with(
+            dir.path(),
+            Fixed {
+                mail: vec![("1", "Your code is 111222", 1)],
+                deletes: true,
+            },
+        );
+        app.global.json = true;
+        let wait = WaitArgs {
+            filter: WaitFilter {
+                include_existing: true,
+                timeout: Some(3),
+                ..Default::default()
+            },
+            otp: true,
+            link: false,
+            otp_regex: None,
+            delete: true,
+        };
+        assert!(app.run(Command::Wait(wait)).is_err());
+        // main prints no `{"error": ...}` after the code's document.
+        assert!(app.error_shown());
     }
 
     #[test]

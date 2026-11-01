@@ -75,6 +75,9 @@ pub struct App {
     /// Set from outside (the MCP server) to stop a running wait.
     #[cfg(feature = "cli")]
     cancel: Option<Arc<AtomicBool>>,
+    /// The failing command has already told the user (and printed its one
+    /// `--json` document), so the error isn't printed again.
+    error_shown: bool,
 }
 
 /// What `--json` prints for an inbox. Credentials are never included.
@@ -123,6 +126,7 @@ impl App {
             log: None,
             #[cfg(feature = "cli")]
             cancel: None,
+            error_shown: false,
         };
         // A key from a newer tmpmail (or a typo) is reported, not fatal:
         // once per process on stderr (the MCP server builds an App per
@@ -150,6 +154,7 @@ impl App {
             log: None,
             #[cfg(feature = "cli")]
             cancel: None,
+            error_shown: false,
         }
     }
 
@@ -157,6 +162,14 @@ impl App {
     #[cfg(test)]
     pub(crate) fn set_provider(&mut self, p: Box<dyn Provider>) {
         self.providers.insert(p.id().to_string(), p);
+    }
+
+    /// Whether the error the last command returned was already shown to
+    /// the user, with what did work (the message before a failed
+    /// `wait --delete`, say), so it shouldn't be printed again: its exit
+    /// code still applies.
+    pub fn error_shown(&self) -> bool {
+        self.error_shown
     }
 
     /// Sends notes and warnings to `log` instead of printing them.

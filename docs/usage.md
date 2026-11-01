@@ -125,7 +125,7 @@ arrives in time it exits with code 2. Built for scripts and CI.
 | `--otp` | | Print only the verification code, and keep waiting until a message that contains one arrives. |
 | `--otp-regex RE` | | With `--otp`: your own pattern; the first `( )` group is the code. Example: `--otp-regex 'PIN: (\d+)'`. |
 | `--link` | | Print only the best link (verification links first). |
-| `--delete` | | Delete the message after printing it. |
+| `--delete` | | Delete the message after printing it. Refused before waiting (exit 64) when the inbox's provider can't delete messages (DropMail, tempmail.lol); with `-a`, those inboxes are skipped with a note instead. If the delete itself fails, the message stays printed (one JSON document with `--json`), the failure is told on stderr, and the exit code is the failure's (e.g. 3). |
 
 ```sh
 code=$(tmpmail wait --otp --from github -t 120)

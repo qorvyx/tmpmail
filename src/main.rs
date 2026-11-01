@@ -44,9 +44,17 @@ fn main() {
     }
 
     let json = cli.global.json;
-    let result = app::App::new(cli.global).and_then(|mut app| app.run(cli.command));
-    if let Err(e) = result {
-        report(&e, json);
+    let mut app = match app::App::new(cli.global) {
+        Ok(app) => app,
+        Err(e) => {
+            report(&e, json);
+            std::process::exit(e.exit_code());
+        }
+    };
+    if let Err(e) = app.run(cli.command) {
+        if !app.error_shown() {
+            report(&e, json);
+        }
         std::process::exit(e.exit_code());
     }
 }

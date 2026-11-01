@@ -431,7 +431,10 @@ impl App {
     /// part with that `Content-ID` in the raw source (mail.tm lists inline
     /// images by file name only), read once for all of them. Raster images
     /// only, up to [`provider::MAX_INLINE_IMAGE`] each; one that can't be
-    /// fetched is left out.
+    /// fetched is left out. A listed attachment is fetched once however
+    /// many names point at it, at most [`provider::MAX_INLINE_CIDS`] names
+    /// are looked up, and at most [`provider::MAX_INLINE_TOTAL`] bytes of
+    /// images are put in the copy.
     fn inline_images(&mut self, n: usize, msg: &Message) -> HashMap<String, String> {
         let mut out = HashMap::new();
         let Some(html) = &msg.html else {
@@ -440,11 +443,32 @@ impl App {
         let id = self.state.inboxes[n].provider.clone();
         let can_raw = self.provider(&id).is_ok_and(|p| p.caps().raw);
         let mut from_source: Option<HashMap<String, (String, Vec<u8>)>> = None;
-        for cid in crate::render::cid_images(html) {
+        // By attachment: its `data:` URL and size, or None if it can't be
+        // shown, so other names for it reuse that.
+        let mut fetched: HashMap<usize, Option<(std::sync::Arc<String>, usize)>> = HashMap::new();
+        let mut total = 0;
+        let fits = |len: usize, total: usize| {
+            len <= provider::MAX_INLINE_IMAGE && total + len <= provider::MAX_INLINE_TOTAL
+        };
+        let cids = crate::render::cid_images(html);
+        for cid in cids.into_iter().take(provider::MAX_INLINE_CIDS) {
             let listed = provider::inline_attachment(msg, &cid).and_then(|(att, mime)| {
-                self.with_inbox_at(n, |p, inbox| p.attachment(inbox, msg, att))
-                    .ok()
-                    .map(|bytes| (mime, bytes))
+                let i = msg.attachments.iter().position(|a| std::ptr::eq(a, att))?;
+                let listed_size = att.size.and_then(|s| usize::try_from(s).ok());
+                fetched
+                    .entry(i)
+                    .or_insert_with(|| {
+                        if listed_size.is_some_and(|len| !fits(len, total)) {
+                            return None;
+                        }
+                        let bytes = self
+                            .with_inbox_at(n, |p, inbox| p.attachment(inbox, msg, att))
+                            .ok()
+                            .filter(|b| b.len() <= provider::MAX_INLINE_IMAGE)?;
+                        let url = format!("data:{mime};base64,{}", base64(&bytes));
+                        Some((std::sync::Arc::new(url), bytes.len()))
+                    })
+                    .clone()
             });
             let image = match listed {
                 Some(image) => Some(image),
@@ -454,13 +478,17 @@ impl App {
                             .map(|raw| provider::inline_images(&raw))
                             .unwrap_or_default()
                     })
-                    .remove(&cid),
+                    .remove(&cid)
+                    .filter(|(_, b)| b.len() <= provider::MAX_INLINE_IMAGE)
+                    .map(|(mime, bytes)| {
+                        let url = format!("data:{mime};base64,{}", base64(&bytes));
+                        (std::sync::Arc::new(url), bytes.len())
+                    }),
                 None => None,
             };
-            if let Some((mime, bytes)) =
-                image.filter(|(_, b)| b.len() <= provider::MAX_INLINE_IMAGE)
-            {
-                out.insert(cid, format!("data:{mime};base64,{}", base64(&bytes)));
+            if let Some((url, len)) = image.filter(|(_, len)| fits(*len, total)) {
+                total += len;
+                out.insert(cid, url.as_str().to_string());
             }
         }
         out
@@ -1546,8 +1574,50 @@ mod tests {
             .into_bytes())
         }
         fn attachment(&self, _: &mut Inbox, _: &Message, a: &Attachment) -> Result<Vec<u8>> {
+            if a.filename == "big.png" {
+                BIG_FETCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return Ok(vec![0; 9 << 20]);
+            }
             Ok(format!("bytes of {}", a.filename).into_bytes())
         }
+    }
+
+    static BIG_FETCHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    #[test]
+    fn inline_images_are_fetched_once_and_capped() {
+        // Security review C1: one 9 MiB attachment under a thousand `cid:`
+        // names is fetched once, and the copy holds at most 25 MiB of it.
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_test(dir.path().to_path_buf());
+        app.set_provider(Box::new(MailTmLike));
+        let inbox = Inbox::new("fake", "a@x.com".into(), Value::Null);
+        app.state = app.store.update(|s| s.add(inbox)).unwrap().0;
+        let html: String = (0..1000)
+            .map(|i| format!("<img src=\"cid:big.png@{i}\">"))
+            .collect::<String>()
+            + &"<img src=\"cid:big.png@0\">".repeat(100);
+        let msg = Message {
+            id: "m1".into(),
+            html: Some(html.clone()),
+            attachments: vec![Attachment {
+                id: "A1".into(),
+                filename: "big.png".into(),
+                content_type: "image/png".into(),
+                size: None,
+                url: None,
+            }],
+            ..Default::default()
+        };
+        let inline = app.inline_images(0, &msg);
+        assert_eq!(BIG_FETCHES.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(inline.len(), provider::MAX_INLINE_TOTAL / (9 << 20));
+        // The same name a hundred times is put in the copy within the
+        // limit too.
+        let doc = safe_html_document_inline("s", &html, false, &inline);
+        let shown = doc.matches("data:image/png;base64,").count();
+        assert_eq!(shown, 2, "{shown}");
+        assert!(doc.len() < provider::MAX_INLINE_TOTAL * 2);
     }
 
     #[test]

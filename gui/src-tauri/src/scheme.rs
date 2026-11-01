@@ -16,8 +16,8 @@ use tauri::{AppHandle, UriSchemeResponder};
 use tmpmail::provider::Message;
 use tmpmail::render::{Frame, escape_html, has_own_colors, sanitize_mail_html};
 
-use crate::Shared;
 use crate::worker::Req;
+use crate::{InlineImage, Shared};
 
 pub const SCHEME: &str = "tmpmail-mail";
 
@@ -150,8 +150,12 @@ pub fn handle(
         ["mail", key] => {
             let view = View::parse(&query);
             let found = key.parse().ok().and_then(|key| {
-                let mails = shared.mails.lock().expect("mails lock");
-                mails.get(key).map(|m| (key, m.msg.clone()))
+                let mut mails = shared.mails.lock().expect("mails lock");
+                mails.get_mut(key).map(|m| {
+                    // A new load of the document asks for its images again.
+                    m.new_document();
+                    (key, m.msg.clone())
+                })
             });
             let Some((key, msg)) = found else {
                 return responder.respond(not_found());
@@ -200,16 +204,17 @@ pub fn handle(
             // The mail's own `cid:` URL is percent-encoded too (RFC 2392):
             // `a%40b` means the part `<a@b>`.
             let cid = tmpmail::provider::cid_of_url(&cid);
-            let cached = {
-                let mails = shared.mails.lock().expect("mails lock");
-                match mails.get(key) {
+            let known = {
+                let mut mails = shared.mails.lock().expect("mails lock");
+                match mails.get_mut(key) {
                     None => return responder.respond(not_found()),
-                    Some(m) => m.inline.get(&cid).cloned(),
+                    Some(m) => m.inline_image(&cid),
                 }
             };
-            match (cached, shared.worker.get()) {
-                (Some((mime, bytes)), _) => responder.respond(image(&mime, bytes)),
-                (None, Some(tx)) => {
+            match (known, shared.worker.get()) {
+                (InlineImage::Image(mime, bytes), _) => responder.respond(image(&mime, bytes)),
+                (InlineImage::Missing, _) => responder.respond(not_found()),
+                (InlineImage::Unknown, Some(tx)) => {
                     // The worker answers (it may need the provider).
                     let _ = tx.send(Req::Inline {
                         key,
@@ -217,7 +222,7 @@ pub fn handle(
                         responder,
                     });
                 }
-                (None, None) => responder.respond(not_found()),
+                (InlineImage::Unknown, None) => responder.respond(not_found()),
             }
         }
         #[cfg(debug_assertions)]

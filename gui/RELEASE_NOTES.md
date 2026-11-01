@@ -68,6 +68,10 @@ what breaks:
   glib 0.18's advisory stays: Tauri 2 needs the GTK 3 bindings, and the app doesn't use the
   affected iterator. Two build tools' advisories stay too (deepmerge has no fixed version;
   minimatch's fix is a new major version a few days old); neither ends up in the app.
+- **Security: inline images are capped per message.** A mail could name one big
+  attachment under a thousand `cid:` names and make the app fetch and keep it a thousand
+  times. Images are now kept by the attachment they are (fetched once), at most 64 names
+  are looked up per message, and at most 25 MiB of images are shown for it.
 
 ## What's new in 0.1.3
 

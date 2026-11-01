@@ -467,7 +467,10 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    only inline or from the scheme, `https:` only after "Load images"; the sanitizer drops
    plain `http:` images). Inline `cid:` images (from the provider's attachment, or decoded
    from the raw source) are served only as raster image types, never
-   SVG. The source view goes through the same scheme as escaped text, under a CSP with no
+   SVG. They are kept by the part they are, so many `cid:` names for one attachment fetch
+   and keep it once; at most 64 names are looked up per message and 25 MiB of images
+   served each time it is shown (a sender's mail of a thousand names for one big image can't make the
+   app download and hold it a thousand times). The source view goes through the same scheme as escaped text, under a CSP with no
    images at all.
 3. It is shown in `<iframe sandbox="allow-popups">`: no scripts, an opaque origin, no IPC.
    The theme and view options are in the frame's URL; no script ever touches the frame.

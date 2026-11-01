@@ -129,6 +129,7 @@ impl Probe {
             let mut mail = Mails::entry("probe@tmpmail.invalid", self.message(name));
             mail.inline
                 .insert(CID.to_string(), ("image/png".into(), PNG.to_vec()));
+            mail.cids.insert(CID.to_string(), Some(CID.to_string()));
             let key = shared.mails.lock().unwrap().insert(mail);
             self.keys.lock().unwrap().push((name.to_string(), key));
         }

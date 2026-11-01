@@ -404,6 +404,17 @@ pub fn image_type(content_type: &str, filename: &str) -> Option<String> {
 /// `read --html`'s copy).
 pub const MAX_INLINE_IMAGE: usize = 10 << 20;
 
+/// The most distinct `cid:` names whose image is looked up for one
+/// message. Real mail shows a few inline images (a logo, a signature); a
+/// mail naming one attachment under a thousand names would otherwise have
+/// it fetched and kept a thousand times.
+pub const MAX_INLINE_CIDS: usize = 64;
+
+/// The most bytes of inline images shown for one message, counting each
+/// time an image is shown: 25 MiB, the usual limit of a whole mail at the
+/// big mail services, so no real mail's images reach it.
+pub const MAX_INLINE_TOTAL: usize = 25 << 20;
+
 /// The inline images of a message's raw source, by `Content-ID` (without
 /// its angle brackets): every part with one that may be shown as an image
 /// ([`image_type`]), as its type and bytes, up to [`MAX_INLINE_IMAGE`]. The

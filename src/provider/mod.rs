@@ -12,7 +12,9 @@ use serde_json::Value;
 
 use crate::error::{Error, Result, unsupported};
 
-pub use source::{MAX_INLINE_IMAGE, cid_of_url, image_type, inline_images};
+pub use source::{
+    MAX_INLINE_CIDS, MAX_INLINE_IMAGE, MAX_INLINE_TOTAL, cid_of_url, image_type, inline_images,
+};
 
 /// Providers tried by `new` when none is configured. Public-inbox providers
 /// (maildrop) are left out on purpose: anyone who guesses the name reads the mail.

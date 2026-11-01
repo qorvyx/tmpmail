@@ -210,7 +210,7 @@ pub fn sanitize_mail_html(html: &str, allow_remote_images: bool, frame: Option<&
 /// The ids of the `cid:` images (`<img src="cid:ID">`) an HTML body shows,
 /// as the sanitizer reads them, each once ([`crate::provider::cid_of_url`]).
 pub fn cid_images(html: &str) -> Vec<String> {
-    let found = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let found = std::sync::Arc::new(std::sync::Mutex::new((Vec::new(), HashSet::new())));
     let list = found.clone();
     let mut builder = ammonia::Builder::default();
     builder
@@ -219,14 +219,14 @@ pub fn cid_images(html: &str) -> Vec<String> {
             if let ("img", "src", Some(id)) = (element, attribute, value.strip_prefix("cid:")) {
                 let id = crate::provider::cid_of_url(id);
                 let mut list = list.lock().expect("cid list");
-                if !list.contains(&id) {
-                    list.push(id);
+                if list.1.insert(id.clone()) {
+                    list.0.push(id);
                 }
             }
             Some(Cow::Borrowed(value))
         });
     builder.clean(html);
-    std::mem::take(&mut *found.lock().expect("cid list"))
+    std::mem::take(&mut found.lock().expect("cid list").0)
 }
 
 fn sanitize(
@@ -236,6 +236,11 @@ fn sanitize(
     inline: &HashMap<String, String>,
 ) -> String {
     let inline = inline.clone();
+    // Each `<img src="cid:...">` gets its own copy of the image's `data:`
+    // URL, so one image shown a thousand times would make a copy a thousand
+    // times its size: past the per-message limit (as base64), the rest stay
+    // `cid:`, which the browser can't load.
+    let budget = std::sync::Mutex::new(crate::provider::MAX_INLINE_TOTAL / 3 * 4 + 4096);
     let mut builder = ammonia::Builder::default();
     builder
         .add_generic_attributes(["style", "align", "bgcolor", "width", "height"])
@@ -260,7 +265,16 @@ fn sanitize(
                 .strip_prefix("cid:")
                 .and_then(|id| inline.get(&crate::provider::cid_of_url(id)))
             {
-                return Some(Cow::Owned(url.clone()));
+                let mut left = budget.lock().expect("inline budget");
+                let fits = *left >= url.len();
+                if fits {
+                    *left -= url.len();
+                }
+                return Some(if fits {
+                    Cow::Owned(url.clone())
+                } else {
+                    Cow::Borrowed(value)
+                });
             }
             let remote = !(value.starts_with("data:") || value.starts_with("cid:"));
             if remote && !allow_remote_images {

@@ -226,6 +226,12 @@ impl Watcher {
         opts: &CreateOpts,
         label: Option<String>,
     ) -> std::result::Result<String, String> {
+        if let Some(l) = &label {
+            self.app
+                .state
+                .check_label(l, None)
+                .map_err(|e| e.to_string())?;
+        }
         let mut inbox = self
             .app
             .create_with_fallback(provider, None, opts)

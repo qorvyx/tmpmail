@@ -301,6 +301,10 @@ tmpmail ls -a                         # mail in every inbox
 tmpmail otp --wait -a                 # a code arriving at any of them
 ```
 
+A label belongs to one inbox: `new -l`, `login -l`, the MCP server's `create_inbox`, the TUI
+and the desktop app refuse one that another inbox already has (or has as its address or local
+part), and `rotate --keep` moves the label to the new inbox.
+
 ### Log back in
 
 mail.tm and mail.gw inboxes are real accounts that last until you delete them. Set a

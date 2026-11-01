@@ -116,35 +116,76 @@ impl State {
     }
 
     pub fn find(&self, address: &str) -> Option<usize> {
-        let address = address.to_lowercase();
+        self.position(address)
+            .or_else(|| match self.matches(address).as_slice() {
+                [one] => Some(*one),
+                _ => None,
+            })
+    }
+
+    /// The inbox with this address, else every inbox with this label or
+    /// local part (any case): shorthands, which only pick one when unique.
+    fn matches(&self, name: &str) -> Vec<usize> {
+        if let Some(n) = self.position(name) {
+            return vec![n];
+        }
         self.inboxes
             .iter()
-            .position(|i| i.address.to_lowercase() == address)
-            .or_else(|| {
-                // Allow a unique label or local-part as shorthand.
-                let hits: Vec<usize> = self
-                    .inboxes
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, i)| {
-                        i.label
-                            .as_deref()
-                            .is_some_and(|l| l.eq_ignore_ascii_case(&address))
-                            || i.local_part().eq_ignore_ascii_case(&address)
-                    })
-                    .map(|(n, _)| n)
-                    .collect();
-                (hits.len() == 1).then(|| hits[0])
+            .enumerate()
+            .filter(|(_, i)| {
+                i.label
+                    .as_deref()
+                    .is_some_and(|l| l.eq_ignore_ascii_case(name))
+                    || i.local_part().eq_ignore_ascii_case(name)
             })
+            .map(|(n, _)| n)
+            .collect()
+    }
+
+    /// Refuses `label` for the inbox `address` (when known) if `-i label`
+    /// would then match another inbox too: one with that label, address or
+    /// local part.
+    pub(crate) fn check_label(&self, label: &str, address: Option<&str>) -> Result<()> {
+        let mine = |i: &Inbox| address.is_some_and(|a| i.address.eq_ignore_ascii_case(a));
+        let Some(other) = self
+            .matches(label)
+            .into_iter()
+            .map(|n| &self.inboxes[n])
+            .find(|i| !mine(i))
+        else {
+            return Ok(());
+        };
+        let why = if other
+            .label
+            .as_deref()
+            .is_some_and(|l| l.eq_ignore_ascii_case(label))
+        {
+            "is already the label of"
+        } else {
+            "would also match"
+        };
+        Err(Error::Usage(format!(
+            "label {label:?} {why} {}; choose another one",
+            other.address
+        )))
     }
 
     /// Index of the inbox a command should act on: the explicit one, else the
     /// active one, else the most recent.
     pub fn resolve(&self, explicit: Option<&str>) -> Result<usize> {
         if let Some(addr) = explicit {
-            return self
-                .find(addr)
-                .ok_or_else(|| Error::NotFound(format!("no stored inbox matches {addr:?}")));
+            return match self.matches(addr).as_slice() {
+                [one] => Ok(*one),
+                [] => Err(Error::NotFound(format!("no stored inbox matches {addr:?}"))),
+                several => Err(Error::Usage(format!(
+                    "{addr:?} matches several inboxes ({}); use the full address",
+                    several
+                        .iter()
+                        .map(|&n| self.inboxes[n].address.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))),
+            };
         }
         if let Some(active) = &self.active {
             if let Some(n) = self.find(active) {
@@ -158,8 +199,21 @@ impl State {
     }
 
     /// Stores `inbox` as the active one, replacing a stored inbox with the
-    /// same address (keeping the messages read there).
+    /// same address (keeping the messages read there). Its label moves to
+    /// it from any other inbox that had it (`rotate --keep`), so a label
+    /// picks one inbox.
     pub fn add(&mut self, mut inbox: Inbox) {
+        if let Some(label) = &inbox.label {
+            for other in &mut self.inboxes {
+                if other
+                    .label
+                    .as_deref()
+                    .is_some_and(|l| l.eq_ignore_ascii_case(label))
+                {
+                    other.label = None;
+                }
+            }
+        }
         if let Some(old) = self
             .inboxes
             .iter_mut()
@@ -275,6 +329,52 @@ mod tests {
         assert_eq!(s.resolve(None).unwrap(), 0);
         s.remove(0);
         assert_eq!(s.active.as_deref(), Some("two@y.com"));
+    }
+
+    #[test]
+    fn a_label_must_pick_one_inbox() {
+        let mut s = State::default();
+        let mut mt = inbox("rapidpebble528@fldubai.com");
+        mt.label = Some("mt1".into());
+        s.add(mt);
+        s.add(inbox("c1old20815@guerrillamailblock.com"));
+        assert!(s.check_label("MT1", None).is_err());
+        assert!(s.check_label("c1old20815", None).is_err());
+        assert!(
+            s.check_label("c1old20815@guerrillamailblock.com", None)
+                .is_err()
+        );
+        assert!(s.check_label("shop", None).is_ok());
+        // Its own label and address are fine (a login of a stored address).
+        assert!(
+            s.check_label("mt1", Some("rapidpebble528@fldubai.com"))
+                .is_ok()
+        );
+
+        // A clash made by an older tmpmail is named, not "no inbox".
+        let mut other = inbox("ufxrcbby@guerrillamailblock.com");
+        other.label = Some("mt1".into());
+        s.inboxes.push(other);
+        let err = s.resolve(Some("mt1")).unwrap_err().to_string();
+        assert!(err.contains("several inboxes"), "{err}");
+        assert!(err.contains("ufxrcbby@guerrillamailblock.com"), "{err}");
+        assert!(matches!(s.resolve(Some("nope")), Err(Error::NotFound(_))));
+    }
+
+    #[test]
+    fn an_added_inbox_takes_its_label_from_the_old_one() {
+        let mut s = State::default();
+        let mut old = inbox("old@x.com");
+        old.label = Some("github".into());
+        s.add(old.clone());
+        let mut new = inbox("new@x.com");
+        new.label = Some("GitHub".into());
+        s.add(new);
+        assert_eq!(s.inboxes[0].label, None);
+        assert_eq!(s.resolve(Some("github")).unwrap(), 1);
+        // Re-adding an inbox with its own label keeps it.
+        s.add(old.clone());
+        assert_eq!(s.inboxes.last().unwrap().label.as_deref(), Some("github"));
     }
 
     #[test]

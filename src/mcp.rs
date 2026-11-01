@@ -172,6 +172,9 @@ impl Server<'_> {
     }
 
     fn create_inbox(&mut self, a: CreateArgs) -> Result<Value> {
+        if let Some(label) = &a.label {
+            self.app.state.check_label(label, None)?;
+        }
         let opts = CreateOpts {
             user: a.user,
             domain: a.domain,

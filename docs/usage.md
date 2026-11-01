@@ -30,6 +30,10 @@ other command works on the active inbox unless you pick another one with `-i`.
 - the part before `@`: `quietotter482`
 - a label you gave it with `-l`: `github`
 
+A local part or label that matches several inboxes picks none: tmpmail lists them and exits
+with 64, so use the full address. A new label can't be one that another inbox already has, nor
+another inbox's address or local part.
+
 **Choosing a message** (`read`, `otp`, `links`, `delete`, `save`, `attachments`). Any of these work:
 - its number in `tmpmail ls`: `1` is the newest
 - its full id: `6aa6c0f1e2...`
@@ -68,7 +72,7 @@ Creates an address, saves it and makes it active. Alias: `generate`. Old flag: `
 | `--user NAME` | `-u` | The part before `@`. Random and readable by default (`quietotter482`). Only providers that allow choosing it are used: mail.tm, mail.gw, Guerrilla, Maildrop. |
 | `--domain DOMAIN` | `-d` | The part after `@`. See `tmpmail domains` for choices. tmpmail asks every provider for its domains at once and goes straight to one that has it, so `-d` works without `-p`. |
 | `--provider ID` | `-p` | Use only this provider (no fallback): `mailtm`, `mailgw`, `dropmail`, `guerrilla`, `tempmail_lol`, `maildrop`. |
-| `--label NAME` | `-l` | A nickname for the inbox, used later with `-i NAME`. Example: `-l github`. |
+| `--label NAME` | `-l` | A nickname for the inbox, used later with `-i NAME`. Example: `-l github`. Refused (exit 64, before anything is created) if another inbox already has it, or has it as its address or local part. |
 | `--password PW` | | Password for the mail.tm/mail.gw account, so you can log in later on the mail.tm website. Random by default. Also `TMPMAIL_PASSWORD`. |
 | `--copy` | `-c` | Also copy the new address to the clipboard. |
 
@@ -178,7 +182,7 @@ there are shown dimmed at start. With `--json` it prints one JSON object per lin
 | `--notify` | `-n` | Also show a desktop notification for each new message, through `notify-send` (Linux), `osascript` (macOS) or a PowerShell toast (Windows). Nothing is shown if none is available. On Linux, `<`, `>` and `&` in the subject are escaped when the notification server reads markup (its `body-markup` capability, asked through `gdbus` or `dbus-send`; assumed when neither can tell), so a sender can't add bold text, links or images to it. |
 | `--interval SECONDS` | | Time between checks. Default 5. Push applies as in `wait`. |
 | `--rotate PERIOD` | | Switch to a fresh address this often, like `rotate` does: `90s`, `30m`, `2h`, `1h30m` (at least `1m`). The new address is printed (and notified with `-n`), becomes active, and is watched from then on. Can't be combined with `-a`. |
-| `--keep` | | With `--rotate`: keep the old inboxes instead of dropping them. |
+| `--keep` | | With `--rotate`: keep the old inboxes instead of dropping them; the label moves to each new inbox, as with `rotate --keep`. |
 | `--copy` | `-c` | With `--rotate`: copy each new address to the clipboard. |
 
 ```sh
@@ -283,7 +287,7 @@ Adds an account you already have, e.g. one created on the mail.tm website or on 
 | `ADDRESS` | | The full address. |
 | `--password PW` | | Its password (required for mail.tm/mail.gw). Also `TMPMAIL_PASSWORD`. |
 | `--provider ID` | `-p` | `mailtm` (default), `mailgw`, or `maildrop` (chosen automatically for `@maildrop.cc`; no password needed). |
-| `--label NAME` | `-l` | A nickname, as in `new`. |
+| `--label NAME` | `-l` | A nickname, as in `new`. Without it, logging in again to a stored address keeps its label. |
 
 ### `drop`: delete an inbox
 
@@ -297,7 +301,8 @@ Deletes the inbox at the provider (where possible) and removes it from tmpmail.
 ### `rotate`: get a fresh address
 
 Creates a new address (same provider if it is up), keeps the old label, makes it active,
-and drops the old inbox.
+and drops the old inbox. With `--keep`, the label moves to the new inbox and the old one keeps
+none, so the label still picks one inbox.
 
 | Option | Short | Explanation |
 |---|---|---|
@@ -338,7 +343,7 @@ or, in a client's JSON config:
 
 | Tool | What it does |
 |---|---|
-| `create_inbox` | New address, with provider fallback. Optional `provider`, `user`, `domain`, `label`. Does not change your active inbox if you have one. |
+| `create_inbox` | New address, with provider fallback. Optional `provider`, `user`, `domain`, `label` (refused, as in `new -l`, if another inbox has it). Does not change your active inbox if you have one. |
 | `list_inboxes` | Your saved inboxes, as in `inboxes --json`. |
 | `list_messages` | Messages in an inbox, newest first. |
 | `read_message` | One message as text, with ranked links and attachment names (`include_html` adds the HTML). |

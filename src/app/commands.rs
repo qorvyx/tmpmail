@@ -92,6 +92,13 @@ impl App {
             user = Some(u.to_string());
             domain = Some(d.to_string());
         }
+        if let Some(label) = &a.label {
+            let address = match (&user, &domain) {
+                (Some(u), Some(d)) => Some(format!("{u}@{d}")),
+                _ => None,
+            };
+            self.state.check_label(label, address.as_deref())?;
+        }
         let opts = CreateOpts {
             user,
             domain,
@@ -969,6 +976,9 @@ impl App {
                 .unwrap_or("mailtm")
                 .to_string()
         });
+        if let Some(label) = &a.label {
+            self.state.check_label(label, Some(&a.address))?;
+        }
         let p = provider::get(&id)?;
         let password = match (&a.password, p.caps().private) {
             (Some(pw), _) => pw.clone(),
@@ -980,7 +990,11 @@ impl App {
             }
         };
         let mut inbox = checked_address(p.as_ref(), p.login(&a.address, &password)?)?;
-        inbox.label = a.label;
+        // Logging in again to a stored address keeps its label.
+        inbox.label = a.label.or_else(|| {
+            let n = self.state.position(&inbox.address)?;
+            self.state.inboxes[n].label.clone()
+        });
         self.activate(&inbox, false)
     }
 
@@ -1257,6 +1271,41 @@ mod tests {
             .wait_for(&filter, |m, body| extract::otp(&m.subject, body, None))
             .unwrap();
         assert_eq!((msg.id.as_str(), code.as_str()), ("new", "333444"));
+    }
+
+    #[test]
+    fn new_and_login_refuse_a_taken_label_before_any_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_with(dir.path(), Fixed { mail: Vec::new() });
+        app.state = app
+            .store
+            .update(|s| s.inboxes[0].label = Some("mt1".into()))
+            .unwrap()
+            .0;
+        // Guerrilla is never contacted: the label is checked first.
+        let new = NewArgs {
+            user: None,
+            domain: None,
+            provider: Some("guerrilla".into()),
+            label: Some("mt1".into()),
+            password: None,
+            copy: false,
+            address: None,
+        };
+        let err = app.run(Command::New(new)).unwrap_err();
+        assert!(matches!(err, Error::Usage(_)), "{err}");
+        assert!(err.to_string().contains("a@x.com"), "{err}");
+        let login = LoginArgs {
+            address: "b@maildrop.cc".into(),
+            password: None,
+            provider: None,
+            label: Some("A".into()),
+        };
+        let err = app.run(Command::Login(login)).unwrap_err();
+        assert!(
+            err.to_string().contains("would also match a@x.com"),
+            "{err}"
+        );
     }
 
     #[test]

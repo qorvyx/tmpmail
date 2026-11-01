@@ -564,6 +564,12 @@ impl App {
         if !keep {
             let _ = p.delete_inbox(&mut old.clone());
             self.forget(&old.address)?;
+        } else if let Some(label) = &old.label {
+            // Storing the new inbox takes the label off the old one.
+            self.note(&format!(
+                "label {label:?} moves to the new inbox; {} keeps none",
+                old.address
+            ));
         }
         Ok(inbox)
     }

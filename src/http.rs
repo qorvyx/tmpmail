@@ -115,22 +115,47 @@ impl Http {
             if status.is_success() {
                 return Ok(resp);
             }
-            let body = resp.text().unwrap_or_default();
+            // Only the start is quoted; the rest isn't read.
+            let body = read_capped(resp, MAX_ERROR_BODY, 0)
+                .map(|(b, _)| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_default();
             return Err(self.status_error(status, &body));
         }
     }
 
     pub fn json<T: DeserializeOwned>(&self, build: impl Fn() -> RequestBuilder) -> Result<T> {
         let resp = self.send(build)?;
-        let body = resp.text().map_err(|e| self.transport_error(e))?;
-        self.parse(&body)
+        let body = self.capped(resp, MAX_JSON)?;
+        let body = String::from_utf8_lossy(&body);
+        self.parse(body.strip_prefix('\u{FEFF}').unwrap_or(&body))
     }
 
+    /// A raw message or an attachment, up to [`MAX_BYTES`].
     pub fn bytes(&self, build: impl Fn() -> RequestBuilder) -> Result<Vec<u8>> {
         let resp = self.send(build)?;
-        resp.bytes()
-            .map(|b| b.to_vec())
-            .map_err(|e| self.transport_error(e))
+        self.capped(resp, MAX_BYTES)
+    }
+
+    /// The body, or an error once it passes `limit` bytes (the rest isn't
+    /// read): a provider (or anyone between) can't make tmpmail hold
+    /// gigabytes.
+    fn capped(&self, resp: Response, limit: usize) -> Result<Vec<u8>> {
+        let hint = resp.content_length().unwrap_or(0);
+        match read_capped(resp, limit, hint) {
+            Ok((body, false)) => Ok(body),
+            Ok((_, true)) => Err(self.bad(format!(
+                "the response is larger than {} MiB, more than any mail needs; not read",
+                limit >> 20
+            ))),
+            Err(e) => Err(Error::Unreachable {
+                provider: self.provider.to_string(),
+                detail: if e.kind() == std::io::ErrorKind::TimedOut {
+                    "request timed out".to_string()
+                } else {
+                    root_cause(&e)
+                },
+            }),
+        }
     }
 
     /// POSTs a GraphQL query and returns its `data`, turning a non-empty
@@ -231,6 +256,29 @@ impl Http {
     }
 }
 
+/// The most a JSON answer may be: a listing or a message is far smaller,
+/// but mail.tm's and Maildrop's raw sources come as JSON, so it holds one
+/// of [`MAX_BYTES`] with room for its escaping.
+const MAX_JSON: usize = 80 << 20;
+
+/// The most a raw message or an attachment may be: above the providers'
+/// own message limits (mail.tm and the big mail services take 25-50 MB).
+const MAX_BYTES: usize = 64 << 20;
+
+/// The most of an error answer read, to quote its start.
+const MAX_ERROR_BODY: usize = 64 << 10;
+
+/// Reads at most `limit` bytes of `r` (`hint` long, if known), and whether
+/// there was more.
+fn read_capped(r: impl std::io::Read, limit: usize, hint: u64) -> std::io::Result<(Vec<u8>, bool)> {
+    use std::io::Read;
+    let mut body = Vec::with_capacity(usize::try_from(hint).unwrap_or(0).min(limit + 1));
+    r.take(limit as u64 + 1).read_to_end(&mut body)?;
+    let more = body.len() > limit;
+    body.truncate(limit);
+    Ok((body, more))
+}
+
 fn root_cause(e: &(dyn std::error::Error + 'static)) -> String {
     let mut cur = e;
     while let Some(next) = cur.source() {
@@ -319,5 +367,16 @@ mod tests {
         assert_eq!(timeout_secs(Some("soon"), 45), 45);
         assert_eq!(timeout_secs(Some("soon"), 0), 20);
         assert_eq!(timeout_secs(Some("0"), 45), 45);
+    }
+
+    #[test]
+    fn bodies_are_read_up_to_a_limit() {
+        // Security review A5: no size limit on provider responses.
+        let (body, more) = read_capped(std::io::repeat(b'x'), 1000, 0).unwrap();
+        assert_eq!((body.len(), more), (1000, true));
+        let (body, more) = read_capped(&b"small"[..], 1000, 5).unwrap();
+        assert_eq!((body.as_slice(), more), (&b"small"[..], false));
+        let (_, more) = read_capped(&[0u8; 1000][..], 1000, u64::MAX).unwrap();
+        assert!(!more);
     }
 }

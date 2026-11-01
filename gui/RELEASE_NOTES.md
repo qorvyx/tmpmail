@@ -86,6 +86,10 @@ what breaks:
 - **Security: hostile mail can't stall the app.** HTML past 4 MiB or nested deeper than
   1000 elements is shown as its plain text, under a note, instead of being parsed (100 000
   nested `<div>` took 40 s), and codes and links are found in linear time.
+- **Security: size limits on provider answers.** Raw messages and attachments are read up
+  to 64 MiB (JSON answers a little more), and an attachment's download address is used only
+  on the provider's own site, so a hostile answer can't fill the memory or send the
+  account's token elsewhere.
 
 ## What's new in 0.1.3
 

@@ -163,6 +163,29 @@ pub struct Attachment {
     pub url: Option<String>,
 }
 
+/// Whether `url`, a download address a provider handed out, is on the
+/// provider's own site: `base`'s scheme, port and host, or a host under it
+/// (`files.dropmail.me` under `dropmail.me`), so its credentials may go
+/// with it. A provider's listing could name any address; the bearer token
+/// or the DropMail session in it must not go elsewhere, nor in clear text.
+pub(crate) fn on_provider_host(url: &str, base: &str) -> bool {
+    let parse = |u: &str| {
+        reqwest::Url::parse(u)
+            .ok()
+            .filter(|u| matches!(u.scheme(), "https" | "http"))
+    };
+    let (Some(url), Some(base)) = (parse(url), parse(base)) else {
+        return false;
+    };
+    let (Some(host), Some(base_host)) = (url.host_str(), base.host_str()) else {
+        return false;
+    };
+    url.scheme() == base.scheme()
+        && url.port_or_known_default() == base.port_or_known_default()
+        && (host == base_host
+            || (base.domain().is_some() && host.ends_with(&format!(".{base_host}"))))
+}
+
 /// The attachment an inline image (`cid:ID` in the HTML, as
 /// [`cid_of_url`] gives it) is, by the provider's listing: the attachment
 /// whose id or file name is the cid or its part before `@`, and that may be
@@ -524,5 +547,48 @@ mod tests {
             assert_eq!(get(id).unwrap().id(), id);
         }
         assert!(get("1secmail").is_err());
+    }
+
+    #[test]
+    fn downloads_stay_on_the_providers_site() {
+        // Security review A10.
+        for (url, base, ok) in [
+            (
+                "https://api.mail.tm/messages/1/download",
+                "https://api.mail.tm",
+                true,
+            ),
+            ("https://mail.tm/x", "https://api.mail.tm", false),
+            ("https://files.dropmail.me/x", "https://dropmail.me", true),
+            ("http://api.mail.tm/x", "https://api.mail.tm", false),
+            ("https://api.mail.tm:8443/x", "https://api.mail.tm", false),
+            (
+                "https://attacker.co.uk/x",
+                "https://mailtm.example.co.uk",
+                false,
+            ),
+            (
+                "https://dropmail.me/download/mail/x",
+                "https://dropmail.me",
+                true,
+            ),
+            ("http://127.0.0.1:1234/a", "http://127.0.0.1:1234", true),
+            ("https://evil.example/x", "https://api.mail.tm", false),
+            (
+                "https://api.mail.tm.evil.example/x",
+                "https://api.mail.tm",
+                false,
+            ),
+            (
+                "https://evil.example/?https://api.mail.tm",
+                "https://api.mail.tm",
+                false,
+            ),
+            ("file:///etc/passwd", "https://api.mail.tm", false),
+            ("http://99.0.0.1/a", "http://10.0.0.1", false),
+            ("/relative", "https://api.mail.tm", false),
+        ] {
+            assert_eq!(on_provider_host(url, base), ok, "{url} on {base}");
+        }
     }
 }

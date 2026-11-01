@@ -361,6 +361,13 @@ impl Provider for MailTm {
             .url
             .clone()
             .unwrap_or_else(|| self.url(&format!("/messages/{}/attachment/{}", msg.id, att.id)));
+        // The account's token goes only to the provider's own site.
+        if !super::on_provider_host(&url, &self.base) {
+            return Err(self.http.bad(format!(
+                "attachment download address isn't on {}: refused",
+                self.base
+            )));
+        }
         self.authed(inbox, |token| {
             self.http
                 .bytes(|| self.http.client().get(&url).bearer_auth(token))
@@ -403,6 +410,31 @@ struct Mercure {
     http: Http,
 }
 
+/// The longest line of the push stream read: its events are a few hundred
+/// bytes.
+const MAX_SSE_LINE: usize = 1 << 20;
+
+/// The next line of the push stream (without its end), `None` at its end,
+/// or an error for a line past [`MAX_SSE_LINE`]: an endless line would
+/// otherwise grow without bound while the idle limit never fires.
+fn sse_line(reader: &mut impl BufRead) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read;
+    let mut line = Vec::new();
+    let n = reader
+        .take(MAX_SSE_LINE as u64 + 1)
+        .read_until(b'\n', &mut line)?;
+    if n == 0 {
+        return Ok(None);
+    }
+    if line.last() != Some(&b'\n') && line.len() > MAX_SSE_LINE {
+        return Err(std::io::Error::other("a line of the stream is too long"));
+    }
+    while matches!(line.last(), Some(b'\n' | b'\r')) {
+        line.pop();
+    }
+    Ok(Some(line))
+}
+
 impl PushStream for Mercure {
     fn run(self: Box<Self>, event: &mut dyn FnMut(PushEvent) -> bool) -> Result<()> {
         // No `.timeout()` on the request: that would end the stream after
@@ -419,12 +451,19 @@ impl PushStream for Mercure {
             return Ok(());
         }
         let started = std::time::Instant::now();
-        for line in BufReader::new(resp).lines() {
-            let line = line.map_err(|e| Error::Unreachable {
-                provider: "mailtm".into(),
-                detail: format!("push stream: {e}"),
-            })?;
-            let kind = if line.starts_with("data:") {
+        let mut reader = BufReader::new(resp);
+        loop {
+            let line = match sse_line(&mut reader) {
+                Ok(Some(line)) => line,
+                Ok(None) => break,
+                Err(e) => {
+                    return Err(Error::Unreachable {
+                        provider: "mailtm".into(),
+                        detail: format!("push stream: {e}"),
+                    });
+                }
+            };
+            let kind = if line.starts_with(b"data:") {
                 PushEvent::Mail
             } else {
                 PushEvent::Alive
@@ -677,5 +716,20 @@ mod tests {
         s.mock("GET", "/domains").with_status(502).create();
         let err = provider(&s).domains().unwrap_err();
         assert!(matches!(err, Error::Unreachable { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn an_endless_push_line_is_refused() {
+        // Security review A5: one endless line grew without bound.
+        let mut ok = std::io::Cursor::new(b"data: {}\r\n:\n".to_vec());
+        assert_eq!(sse_line(&mut ok).unwrap().unwrap(), b"data: {}");
+        assert_eq!(sse_line(&mut ok).unwrap().unwrap(), b":");
+        assert!(sse_line(&mut ok).unwrap().is_none());
+        let endless = std::io::Read::chain(
+            std::io::Cursor::new(b"data: ".to_vec()),
+            std::io::repeat(b'x'),
+        );
+        let mut endless = std::io::BufReader::new(endless);
+        assert!(sse_line(&mut endless).is_err());
     }
 }

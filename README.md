@@ -493,6 +493,9 @@ config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
   Windows device names such as `CON` get a `_` in front, and a leading `-` becomes `_`.
 - `tmpmail mcp` hands message contents to an AI agent. Anyone can mail a temp address, so
   treat what the agent reads there as untrusted input.
+- Provider answers are read up to a limit (64 MiB for a raw message or an attachment, a bit
+  more for a JSON answer that holds one), and an attachment's download address gets the inbox's credentials only when
+  it is on the provider's own site.
 - No telemetry. The only network traffic is to the provider you use.
 
 ## Development

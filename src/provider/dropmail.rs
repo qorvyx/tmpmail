@@ -325,7 +325,7 @@ impl Provider for DropMail {
 
     fn raw(&self, inbox: &mut Inbox, id: &str) -> Result<Vec<u8>> {
         let mail = self.find_mail(inbox, id)?;
-        let url = str_field(&mail, "downloadUrl").to_string();
+        let url = self.checked_download(str_field(&mail, "downloadUrl"))?;
         self.http.bytes(|| self.http.client().get(&url))
     }
 
@@ -342,11 +342,24 @@ impl Provider for DropMail {
             .url
             .clone()
             .ok_or_else(|| self.http.bad("attachment has no download URL"))?;
+        let url = self.checked_download(&url)?;
         self.http.bytes(|| self.http.client().get(&url))
     }
 }
 
 impl DropMail {
+    /// A download address from DropMail's answer, if it is on DropMail's
+    /// own site (it carries the session).
+    fn checked_download(&self, url: &str) -> Result<String> {
+        if super::on_provider_host(url, &self.base) {
+            Ok(url.to_string())
+        } else {
+            Err(self
+                .http
+                .bad(format!("download address isn't on {}: refused", self.base)))
+        }
+    }
+
     fn domain_ids(&self) -> Result<Vec<(String, String)>> {
         let (_, data) = self.gql_any("{ domains { id name availableVia } }", &json!({}))?;
         let list: Vec<(String, String)> = data["domains"]

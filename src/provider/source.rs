@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use super::mime::decode_words;
+use super::mime::{Charset, decode_words};
 
 /// How deep multiparts may nest before the rest is ignored.
 const MAX_DEPTH: usize = 12;
@@ -35,6 +35,23 @@ impl Part<'_> {
             "quoted-printable" => quoted_printable(self.body),
             _ => self.body.to_vec(),
         }
+    }
+
+    /// The body as text, in its charset (UTF-8 when it names none), with
+    /// plain `\n` line ends. `None` for a charset tmpmail can't decode.
+    pub fn text(&self) -> Option<String> {
+        let charset = match &self.charset {
+            Some(name) => Charset::from_name(name)?,
+            None => Charset::Utf8,
+        };
+        Some(charset.decode(&self.bytes()).replace("\r\n", "\n"))
+    }
+
+    /// A body part of the message (its text or HTML), not an attachment.
+    pub fn is_body(&self) -> bool {
+        matches!(self.content_type.as_str(), "text/plain" | "text/html")
+            && self.filename.is_none()
+            && self.disposition.as_deref() != Some("attachment")
     }
 }
 
@@ -418,6 +435,23 @@ pub fn cid_of_url(id: &str) -> String {
     id.trim_start_matches('<').trim_end_matches('>').to_string()
 }
 
+/// The message's text and HTML bodies, from its raw source: every
+/// `text/plain` (and every `text/html`) part that isn't an attachment, in
+/// order, joined as mail.tm joins them. `None` for a kind there is none of,
+/// or whose charset tmpmail can't decode.
+pub fn bodies(raw: &[u8]) -> (Option<String>, Option<String>) {
+    let parts = parts(raw);
+    let body = |ct: &str| -> Option<String> {
+        let texts: Option<Vec<String>> = parts
+            .iter()
+            .filter(|p| p.is_body() && p.content_type == ct)
+            .map(Part::text)
+            .collect();
+        texts.filter(|t| !t.is_empty()).map(|t| t.concat())
+    };
+    (body("text/plain"), body("text/html"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,6 +497,16 @@ Content-ID: <evil@x>\r\n\
         assert_eq!(p.len(), 4);
         assert_eq!(p[2].content_id.as_deref(), Some("1793.52@tmpmail.test"));
         assert_eq!(p[2].filename.as_deref(), Some("inline-box.png"));
+        let (text, html) = bodies(raw);
+        assert_eq!(text.as_deref(), Some("Café résumé"));
+        // A charset tmpmail can't decode gives nothing, not garbage.
+        let cyrillic =
+            b"Content-Type: text/plain; charset=windows-1251\r\n\r\n\xcf\xf0\xe8\xe2\xe5\xf2";
+        assert_eq!(bodies(cyrillic), (None, None));
+        assert_eq!(
+            html.as_deref(),
+            Some("<p>café <img src=\"cid:1793.52@tmpmail.test\"></p>")
+        );
     }
 
     #[test]
@@ -487,7 +531,7 @@ Content-ID: <evil@x>\r\n\
             "Content-Type: text/plain\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nend=",
             "Content-Type: text/plain; charset*=''\r\nContent-Disposition: attachment; filename*0*=%\r\n\r\nx",
         ] {
-            let _ = parts(raw.as_bytes()).iter().map(Part::bytes).count();
+            let _ = bodies(raw.as_bytes());
             let _ = inline_images(raw.as_bytes());
         }
         let deep = "Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\n".repeat(50);

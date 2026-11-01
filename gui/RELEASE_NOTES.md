@@ -36,6 +36,9 @@ what breaks:
 - **`j`/`k` keep the open message in view.** Past the last visible row the message opened
   but the list stayed put; it now scrolls just enough to show it. `[`/`]` do the same in
   the inbox list.
+- **Long mail from mail.tm shows whole.** mail.tm cuts a message's text at 100 KiB without
+  a word; the app (through the core of CLI 0.3.5) now reads the rest from the raw message,
+  or says the text may be cut and that Source has all of it.
 - **A narrow message pane stays readable.** With the window tiled to half the screen, the
   sender's name ran over the date and the links were cut to a letter or two. The message
   list now gives way (down to 280 px) so the open message keeps 340 px where it can, the

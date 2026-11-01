@@ -115,6 +115,12 @@ the inbox isn't the active one (picked with `-i`, `TMPMAIL_INBOX`, or `wait -a`)
 | `--raw` | | Print the full raw email source (headers + MIME). Useful for debugging or `> mail.eml`. Supported by mail.tm, mail.gw, DropMail and Maildrop; Guerrilla and tempmail.lol don't offer it (exit 64). `providers` shows it as `raw`. |
 | `--no-pager` | | Print a long message straight to the terminal. By default a message taller than the terminal opens in a pager: `pager` from the config, else `$PAGER`, else `less`. On Windows, if neither is set and `less` isn't installed, the message is printed instead. |
 
+mail.tm and mail.gw cut a long message's text (and HTML) at 100 KiB, mid-line and without a
+word. When a body is that long, `read` (and everything else that reads a message: `wait`,
+`otp`, `links`, the TUI, the MCP server, the desktop app) checks the raw source and uses its
+whole text instead. If the source can't be read (or has no longer text it can decode), the
+text ends with a note that it may be cut and that `read --raw` has all of it.
+
 ### `wait`: wait for a message
 
 Blocks until a **new** message that matches arrives, prints it and exits 0. If nothing

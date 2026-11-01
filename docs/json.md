@@ -92,6 +92,11 @@ was printed, the failure goes to stderr (no `error` document follows) and sets t
 Attachment `size` is in bytes, or `null` when the provider doesn't say. mail.tm and mail.gw
 only report whole kilobytes, so their sizes are rounded up to a multiple of 1024.
 
+mail.tm and mail.gw cut `text` and `html` at 100 KiB (102 400 bytes). tmpmail then reads the
+message's raw source, which is whole, and gives its text and HTML instead. If the source
+can't be read (or has no longer body it can decode), `text` ends with a line saying it may
+be cut and that `read --raw` has all of it (`html` with a paragraph saying so).
+
 ## Other commands
 
 | Command | Output |

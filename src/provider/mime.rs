@@ -48,23 +48,38 @@ pub fn decode_words(s: &str) -> String {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Charset {
+pub(super) enum Charset {
     Utf8,
-    Latin1,
     Latin9,
     Windows1252,
+}
+
+impl Charset {
+    /// The charsets tmpmail decodes, by their MIME names. ISO-8859-1 is
+    /// read as Windows-1252, as browsers do: mail labelled Latin-1 often is.
+    pub(super) fn from_name(name: &str) -> Option<Charset> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "utf-8" | "utf8" | "us-ascii" => Charset::Utf8,
+            "iso-8859-1" | "latin1" | "windows-1252" | "cp1252" => Charset::Windows1252,
+            "iso-8859-15" | "latin9" => Charset::Latin9,
+            _ => return None,
+        })
+    }
+
+    pub(super) fn decode(self, bytes: &[u8]) -> String {
+        match self {
+            Charset::Utf8 => String::from_utf8_lossy(bytes).into_owned(),
+            Charset::Latin9 => bytes.iter().map(|&b| latin9(b)).collect(),
+            Charset::Windows1252 => bytes.iter().map(|&b| windows_1252(b)).collect(),
+        }
+    }
 }
 
 fn flush(out: &mut String, pending: Option<(Charset, Vec<u8>)>) {
     let Some((charset, bytes)) = pending else {
         return;
     };
-    let text: String = match charset {
-        Charset::Utf8 => String::from_utf8_lossy(&bytes).into_owned(),
-        Charset::Latin1 => bytes.iter().map(|&b| b as char).collect(),
-        Charset::Latin9 => bytes.iter().map(|&b| latin9(b)).collect(),
-        Charset::Windows1252 => bytes.iter().map(|&b| windows_1252(b)).collect(),
-    };
+    let text = charset.decode(&bytes);
     // A header is one line: an encoded `=0D=0A` must not make it two.
     out.extend(text.chars().filter(|c| !c.is_control()));
 }
@@ -90,14 +105,7 @@ fn word(s: &str) -> Option<(Charset, Vec<u8>, usize)> {
         return None;
     }
     // RFC 2231 allows a language after the charset: `utf-8*en`.
-    let charset = charset.split('*').next()?.to_ascii_lowercase();
-    let charset = match charset.as_str() {
-        "utf-8" | "utf8" | "us-ascii" => Charset::Utf8,
-        "iso-8859-1" | "latin1" => Charset::Latin1,
-        "iso-8859-15" | "latin9" => Charset::Latin9,
-        "windows-1252" | "cp1252" => Charset::Windows1252,
-        _ => return None,
-    };
+    let charset = Charset::from_name(charset.split('*').next()?)?;
     let bytes = match encoding {
         "b" | "B" => base64(text)?,
         "q" | "Q" => quoted(text)?,

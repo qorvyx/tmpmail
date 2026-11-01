@@ -9,13 +9,15 @@ use serde_json::{Value, json};
 
 use super::{
     Attachment, Capabilities, CreateOpts, Inbox, Message, Provider, PushEvent, PushStream, Summary,
-    base_url, domain_unavailable, opt_str, parse_date, random_password, random_user, str_field,
-    with_token,
+    base_url, domain_unavailable, opt_str, parse_date, random_password, random_user, source,
+    str_field, with_token,
 };
 use crate::error::{Error, Result};
 use crate::http::Http;
 
 const PAGE_SIZE: usize = 30;
+/// Where mail.tm cuts a message's text and HTML (102 400 bytes).
+const BODY_CAP: usize = 100 * 1024;
 const MAX_PAGES: usize = 5;
 /// The Mercure hub sends a comment line every 30 s; this much silence means
 /// the connection is dead.
@@ -63,6 +65,39 @@ impl MailTm {
             base: base_url(id, base),
             mercure: None,
             http: Http::new(id),
+        }
+    }
+
+    /// mail.tm (and mail.gw) cut a message's text, and its HTML, at
+    /// [`BODY_CAP`] bytes, mid-line and without a word. A body that long
+    /// (or a few bytes short, cut at a character's edge) is checked against
+    /// the raw source, which is whole: when the source's body is longer, it
+    /// was cut, and the source's is used. When the source can't be read or
+    /// has no longer body to give, the body says it may be cut and where
+    /// the rest is.
+    fn whole_bodies(&self, inbox: &mut Inbox, msg: &mut Message) {
+        let long = |b: &Option<String>| b.as_ref().is_some_and(|b| b.len() + 4 > BODY_CAP);
+        if !long(&msg.text) && !long(&msg.html) {
+            return;
+        }
+        let (text, html) = match self.raw(inbox, &msg.id) {
+            Ok(raw) => source::bodies(&raw),
+            Err(_) => (None, None),
+        };
+        let note = format!(
+            "{} may have cut this message at 100 KiB. The whole message is in its source: \
+             `tmpmail read --raw`, or Source in the desktop app.",
+            self.name
+        );
+        for (body, whole, html) in [(&mut msg.text, text, false), (&mut msg.html, html, true)] {
+            let Some(cut) = body.as_mut().filter(|b| b.len() + 4 > BODY_CAP) else {
+                continue;
+            };
+            match whole.filter(|w| w.len() > cut.len()) {
+                Some(whole) => *cut = whole,
+                None if html => cut.push_str(&format!("\n<p><b>[{note}]</b></p>")),
+                None => cut.push_str(&format!("\n\n[{note}]")),
+            }
         }
     }
 
@@ -296,7 +331,7 @@ impl Provider for MailTm {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(Message {
+        let mut msg = Message {
             id: str_field(&v, "id").to_string(),
             from: format_addr(&v["from"]),
             to: v["to"]
@@ -308,7 +343,9 @@ impl Provider for MailTm {
             text: opt_str(&v, "text"),
             html,
             attachments,
-        })
+        };
+        self.whole_bodies(inbox, &mut msg);
+        Ok(msg)
     }
 
     fn raw(&self, inbox: &mut Inbox, id: &str) -> Result<Vec<u8>> {
@@ -474,6 +511,65 @@ mod tests {
             msg.attachments[0].url.as_deref(),
             Some(format!("{}/messages/m1/attachment/ATT1", s.url()).as_str())
         );
+    }
+
+    /// Campaign round 2's long mail (B7): 2 500 lines, its text cut at
+    /// exactly 102 400 bytes, mid-line; the source has all of it.
+    #[test]
+    fn a_cut_text_comes_whole_from_the_source() {
+        let whole: String = (1..=2500)
+            .map(|n| format!("Line {n:04}: the quick brown fox jumps over the lazy dog\n"))
+            .collect();
+        let cut = &whole[..BODY_CAP];
+        let message = |id: &str| {
+            json!({"id": id, "from": {"address": "a@b.c", "name": ""}, "to": [], "subject": "Long",
+                "text": cut, "html": [], "createdAt": "2026-11-01T04:00:00+00:00", "attachments": []})
+            .to_string()
+        };
+        let mut s = Server::new();
+        for id in ["m1", "m2", "m3"] {
+            s.mock("GET", format!("/messages/{id}").as_str())
+                .with_body(message(id))
+                .create();
+        }
+        let source = format!(
+            "Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{whole}"
+        );
+        s.mock("GET", "/sources/m1")
+            .with_body(json!({"id": "m1", "data": source}).to_string())
+            .create();
+        s.mock("GET", "/sources/m2").with_status(500).create();
+        // A source in a charset tmpmail can't decode: the cut text stays,
+        // with the note, rather than garbage.
+        let source = format!("Content-Type: text/plain; charset=koi8-r\r\n\r\n{whole}");
+        s.mock("GET", "/sources/m3")
+            .with_body(json!({"id": "m3", "data": source}).to_string())
+            .create();
+        let p = provider(&s);
+        let mut inbox = Inbox::new(
+            "mailtm",
+            "x@x.com".into(),
+            json!({"password":"pw","token":"t"}),
+        );
+
+        let msg = p.get(&mut inbox, "m1").unwrap();
+        assert_eq!(msg.text.as_deref(), Some(whole.as_str()));
+        assert!(
+            msg.text
+                .unwrap()
+                .ends_with("Line 2500: the quick brown fox jumps over the lazy dog\n")
+        );
+        // No source: the cut text says so.
+        let msg = p.get(&mut inbox, "m2").unwrap();
+        let text = msg.text.unwrap();
+        assert!(text.starts_with(cut));
+        assert!(
+            text.ends_with("`tmpmail read --raw`, or Source in the desktop app.]"),
+            "{}",
+            &text[BODY_CAP..]
+        );
+        let text = p.get(&mut inbox, "m3").unwrap().text.unwrap();
+        assert!(text.starts_with(cut) && text.ends_with("desktop app.]"));
     }
 
     #[test]

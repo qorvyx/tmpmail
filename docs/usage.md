@@ -30,9 +30,14 @@ other command works on the active inbox unless you pick another one with `-i`.
 - the part before `@`: `quietotter482`
 - a label you gave it with `-l`: `github`
 
-A local part or label that matches several inboxes picks none: tmpmail lists them and exits
-with 64, so use the full address. A new label can't be one that another inbox already has, nor
-another inbox's address or local part.
+A label wins over a local part: if one inbox is labelled `work` and another is
+`work@example.com`, `-i work` picks the labelled one. A local part that matches several inboxes
+picks none: tmpmail lists them and exits with 64, so use the full address. A new label can't be
+one that another inbox already has, nor another inbox's address or local part. A new or
+logged-in address can't have another inbox's label before its `@` either (`new -u work`,
+`new work@…`, `login work@…`): that's refused with exit 64, naming the labelled inbox, before
+any provider is asked. If a provider hands out such a name by chance (a random address, or
+`rotate`), the inbox is kept, a warning says so (the MCP server's `create_inbox` adds it as `note`), and the label still picks its own inbox. Creating or logging in again to an address that is already stored is not refused, and keeps its label.
 
 **Choosing a message** (`read`, `otp`, `links`, `delete`, `save`, `attachments`). Any of these work:
 - its number in `tmpmail ls`: `1` is the newest
@@ -69,7 +74,7 @@ Creates an address, saves it and makes it active. Alias: `generate`. Old flag: `
 | Option | Short | Explanation |
 |---|---|---|
 | `ADDRESS` | | Full address you want, e.g. `tmpmail new otter42@maxxspace.com`. Same as `-u otter42 -d maxxspace.com`. |
-| `--user NAME` | `-u` | The part before `@`. Random and readable by default (`quietotter482`). Only providers that allow choosing it are used: mail.tm, mail.gw, Guerrilla, Maildrop. |
+| `--user NAME` | `-u` | The part before `@`. Random and readable by default (`quietotter482`). Only providers that allow choosing it are used: mail.tm, mail.gw, Guerrilla, Maildrop. Refused (exit 64, before anything is created) if it is another inbox's label. |
 | `--domain DOMAIN` | `-d` | The part after `@`. See `tmpmail domains` for choices. tmpmail asks every provider for its domains at once and goes straight to one that has it, so `-d` works without `-p`. If none that answered has it, that's exit 64; if some couldn't be reached, exit 3 names them. Maildrop's `maildrop.cc` is the exception: Maildrop is left out of the fallback (its inboxes are public), so `-d maildrop.cc` or `new NAME@maildrop.cc` asks you to add `-p maildrop` (exit 64; the MCP server's `create_inbox` and the apps ask for that provider too). An empty username or domain (`new foo@`) is a usage error too. |
 | `--provider ID` | `-p` | Use only this provider (no fallback): `mailtm`, `mailgw`, `dropmail`, `guerrilla`, `tempmail_lol`, `maildrop`. |
 | `--label NAME` | `-l` | A nickname for the inbox, used later with `-i NAME`. Example: `-l github`. Refused (exit 64, before anything is created) if another inbox already has it, or has it as its address or local part. |
@@ -295,7 +300,7 @@ Adds an account you already have, e.g. one created on the mail.tm website or on 
 | `ADDRESS` | | The full address. |
 | `--password PW` | | Its password (required for mail.tm/mail.gw). Also `TMPMAIL_PASSWORD`. |
 | `--provider ID` | `-p` | `mailtm` (default), `mailgw`, or `maildrop` (chosen automatically for `@maildrop.cc`; no password needed, and the same warning as `new` that its inboxes are public). |
-| `--label NAME` | `-l` | A nickname, as in `new`. Without it, logging in again to a stored address keeps its label. |
+| `--label NAME` | `-l` | A nickname, as in `new`. Without it, logging in again to a stored address keeps its label. An address whose part before `@` is another inbox's label is refused (exit 64), as in `new -u`. |
 
 ### `drop`: delete an inbox
 
@@ -352,7 +357,7 @@ or, in a client's JSON config:
 
 | Tool | What it does |
 |---|---|
-| `create_inbox` | New address, with provider fallback. Optional `provider`, `user`, `domain`, `label` (refused, as in `new -l`, if another inbox has it). Does not change your active inbox if you have one. |
+| `create_inbox` | New address, with provider fallback. Optional `provider`, `user`, `domain`, `label` (refused, as in `new -l`, if another inbox has it; a `user` that is another inbox's label is refused too, as in `new -u`). Does not change your active inbox if you have one. |
 | `list_inboxes` | Your saved inboxes, as in `inboxes --json`. |
 | `list_messages` | Messages in an inbox, newest first. |
 | `read_message` | One message as text, with ranked links and attachment names (`include_html` adds the HTML). |

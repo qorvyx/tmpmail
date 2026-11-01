@@ -123,12 +123,29 @@ impl State {
             })
     }
 
-    /// The inbox with this address, else every inbox with this label or
-    /// local part (any case): shorthands, which only pick one when unique.
+    /// The inbox with this address, else the inbox with this label, else
+    /// every inbox with this local part (any case): shorthands, which only
+    /// pick one when unique. A label beats a local part, so the inbox it
+    /// names stays reachable by it whatever address another inbox gets.
     fn matches(&self, name: &str) -> Vec<usize> {
         if let Some(n) = self.position(name) {
             return vec![n];
         }
+        let labeled = self.labeled(name);
+        if !labeled.is_empty() {
+            return labeled;
+        }
+        self.inboxes
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.local_part().eq_ignore_ascii_case(name))
+            .map(|(n, _)| n)
+            .collect()
+    }
+
+    /// Every inbox with this label (any case): one, unless an older tmpmail
+    /// stored a clash.
+    fn labeled(&self, name: &str) -> Vec<usize> {
         self.inboxes
             .iter()
             .enumerate()
@@ -136,38 +153,56 @@ impl State {
                 i.label
                     .as_deref()
                     .is_some_and(|l| l.eq_ignore_ascii_case(name))
-                    || i.local_part().eq_ignore_ascii_case(name)
             })
             .map(|(n, _)| n)
             .collect()
     }
 
-    /// Refuses `label` for the inbox `address` (when known) if `-i label`
-    /// would then match another inbox too: one with that label, address or
-    /// local part.
+    /// Refuses `label` for the inbox `address` (when known) if another inbox
+    /// has it as its label, address or local part.
     pub(crate) fn check_label(&self, label: &str, address: Option<&str>) -> Result<()> {
-        let mine = |i: &Inbox| address.is_some_and(|a| i.address.eq_ignore_ascii_case(a));
-        let Some(other) = self
-            .matches(label)
-            .into_iter()
-            .map(|n| &self.inboxes[n])
-            .find(|i| !mine(i))
-        else {
-            return Ok(());
-        };
-        let why = if other
-            .label
-            .as_deref()
-            .is_some_and(|l| l.eq_ignore_ascii_case(label))
-        {
-            "is already the label of"
+        let other = |i: &&Inbox| address.is_none_or(|a| !i.address.eq_ignore_ascii_case(a));
+        let (why, other) = if let Some(holder) = self.label_holder(label, address) {
+            ("is already the label of", holder)
+        } else if let Some(i) = self.inboxes.iter().filter(other).find(|i| {
+            i.address.eq_ignore_ascii_case(label) || i.local_part().eq_ignore_ascii_case(label)
+        }) {
+            ("would also match", i)
         } else {
-            "would also match"
+            return Ok(());
         };
         Err(Error::Usage(format!(
             "label {label:?} {why} {}; choose another one",
             other.address
         )))
+    }
+
+    /// Another inbox (not `address`) whose label is `name`: the one `-i NAME`
+    /// picks, so a new address with `name` before its `@` couldn't be
+    /// picked by it.
+    pub(crate) fn label_holder(&self, name: &str, address: Option<&str>) -> Option<&Inbox> {
+        self.labeled(name)
+            .into_iter()
+            .map(|n| &self.inboxes[n])
+            .find(|i| address.is_none_or(|a| !i.address.eq_ignore_ascii_case(a)))
+    }
+
+    /// Refuses `user` as the name (the part before `@`) of a new or
+    /// logged-in address `address` when another inbox has it as its label.
+    /// An address already stored passes: logging in to it again, or
+    /// creating it again, adds no clash.
+    pub(crate) fn check_user(&self, user: &str, address: Option<&str>) -> Result<()> {
+        if address.is_some_and(|a| self.position(a).is_some()) {
+            return Ok(());
+        }
+        let user = user.trim();
+        match self.label_holder(user, address) {
+            Some(other) => Err(Error::Usage(format!(
+                "the name {user:?} is already the label of {}; choose another one",
+                other.address
+            ))),
+            None => Ok(()),
+        }
     }
 
     /// Index of the inbox a command should act on: the explicit one, else the
@@ -359,6 +394,43 @@ mod tests {
         assert!(err.contains("several inboxes"), "{err}");
         assert!(err.contains("ufxrcbby@guerrillamailblock.com"), "{err}");
         assert!(matches!(s.resolve(Some("nope")), Err(Error::NotFound(_))));
+    }
+
+    #[test]
+    fn a_label_beats_another_inboxs_local_part() {
+        let mut s = State::default();
+        let mut gm = inbox("tvidfnke@guerrillamailblock.com");
+        gm.label = Some("gm1".into());
+        s.add(gm);
+        // A provider handed out an address named like the label.
+        s.add(inbox("gm1@guerrillamailblock.com"));
+        assert_eq!(s.resolve(Some("gm1")).unwrap(), 0);
+        assert_eq!(s.resolve(Some("GM1")).unwrap(), 0);
+        assert_eq!(s.find("gm1"), Some(0));
+        assert_eq!(s.resolve(Some("gm1@guerrillamailblock.com")).unwrap(), 1);
+        // Chosen names are refused instead.
+        let err = s.check_user("GM1", None).unwrap_err().to_string();
+        assert!(
+            err.contains("is already the label of tvidfnke@guerrillamailblock.com"),
+            "{err}"
+        );
+        assert!(s.check_user("gm2", None).is_ok());
+        // Logging in again to the labeled inbox itself is fine.
+        let mut own = State::default();
+        let mut x = inbox("gm1@x.com");
+        x.label = Some("gm1".into());
+        own.add(x);
+        assert!(own.check_user("gm1", Some("gm1@x.com")).is_ok());
+        assert!(own.check_user(" gm1 ", Some("gm1@y.com")).is_err());
+        // An address stored by chance (or by an older tmpmail) can be
+        // logged in to or created again.
+        assert!(
+            s.check_user("gm1", Some("GM1@guerrillamailblock.com"))
+                .is_ok()
+        );
+        // A label is still refused when another inbox has it as its local
+        // part, though the label would win.
+        assert!(s.check_label("tvidfnke", None).is_err());
     }
 
     #[test]

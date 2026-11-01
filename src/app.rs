@@ -474,6 +474,12 @@ impl App {
         if opts.domain.as_deref().is_some_and(|d| d.trim().is_empty()) {
             return Err(Error::Usage("the domain is empty".into()));
         }
+        // A chosen name that is another inbox's label is refused before any
+        // request: `-i NAME` would keep picking the labeled inbox.
+        if let Some(user) = &opts.user {
+            let address = opts.domain.as_ref().map(|d| format!("{user}@{d}"));
+            self.state.check_user(user, address.as_deref())?;
+        }
         if let Some(id) = explicit {
             let p = provider::get(id)?;
             let inbox = checked_address(p.as_ref(), p.create(opts)?)?;
@@ -564,6 +570,29 @@ impl App {
         ))
     }
 
+    /// Notes when a new inbox (its label set) got, by chance, a name that
+    /// is another inbox's label: `-i NAME` keeps picking the labeled one.
+    /// Returns the note, which is also printed as a warning (so `--json`
+    /// and `-q` users see it too).
+    pub(crate) fn note_label_clash(&self, inbox: &Inbox) -> Option<String> {
+        let name = inbox.local_part();
+        // Its own label moves to it when it is stored (`rotate`).
+        if inbox
+            .label
+            .as_deref()
+            .is_some_and(|l| l.eq_ignore_ascii_case(name))
+        {
+            return None;
+        }
+        let other = self.state.label_holder(name, Some(&inbox.address))?;
+        let note = format!(
+            "{name:?} is the label of {}, so it still picks that inbox; use the full address for {}",
+            other.address, inbox.address
+        );
+        self.warn(&note);
+        Some(note)
+    }
+
     fn note_unused_password(&self, p: &dyn Provider, opts: &CreateOpts) {
         if opts.password.is_some() && !p.caps().login {
             self.note(&format!(
@@ -612,6 +641,7 @@ impl App {
             Err(e) => return Err(e),
         };
         inbox.label = old.label.clone();
+        let _ = self.note_label_clash(&inbox);
         Ok((inbox, old))
     }
 

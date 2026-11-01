@@ -128,7 +128,12 @@ impl App {
             password: a.password,
         };
         let mut inbox = self.create_with_fallback(a.provider.as_deref(), None, &opts)?;
-        inbox.label = a.label;
+        // Creating a stored address again keeps its label, as `login` does.
+        inbox.label = a.label.or_else(|| {
+            let n = self.state.position(&inbox.address)?;
+            self.state.inboxes[n].label.clone()
+        });
+        let _ = self.note_label_clash(&inbox);
         let p = provider::get(&inbox.provider)?;
         let copied = self.activate(&inbox, a.copy)?;
         if !self.global.json {
@@ -1138,6 +1143,9 @@ impl App {
         if let Some(label) = &a.label {
             self.state.check_label(label, Some(&a.address))?;
         }
+        if let Some((user, _)) = a.address.split_once('@') {
+            self.state.check_user(user, Some(&a.address))?;
+        }
         let p = provider::get(&id)?;
         let password = match (&a.password, p.caps().private) {
             (Some(pw), _) => pw.clone(),
@@ -1741,6 +1749,52 @@ mod tests {
         app.set_provider(Box::new(Files { down: false }));
         app.state = app.store.load().unwrap();
         assert!(app.run(Command::Ls(LsArgs { all_inboxes: true })).is_ok());
+    }
+
+    #[test]
+    fn a_name_that_is_another_inboxs_label_is_refused_before_any_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_with(
+            dir.path(),
+            Fixed {
+                mail: Vec::new(),
+                deletes: false,
+            },
+        );
+        app.state = app
+            .store
+            .update(|s| s.inboxes[0].label = Some("gm1".into()))
+            .unwrap()
+            .0;
+        // Guerrilla is never contacted: the name is checked first.
+        for (user, address) in [(Some("GM1"), None), (None, Some("gm1@sharklasers.com"))] {
+            let new = NewArgs {
+                user: user.map(Into::into),
+                domain: None,
+                provider: Some("guerrilla".into()),
+                label: Some("gmx".into()),
+                password: None,
+                copy: false,
+                address: address.map(Into::into),
+            };
+            let err = app.run(Command::New(new)).unwrap_err();
+            assert!(matches!(err, Error::Usage(_)), "{err}");
+            assert!(
+                err.to_string().contains("is already the label of a@x.com"),
+                "{err}"
+            );
+        }
+        let login = LoginArgs {
+            address: "gm1@maildrop.cc".into(),
+            password: None,
+            provider: None,
+            label: None,
+        };
+        let err = app.run(Command::Login(login)).unwrap_err();
+        assert!(matches!(err, Error::Usage(_)), "{err}");
+        assert!(err.to_string().contains("a@x.com"), "{err}");
+        // Nothing was stored.
+        assert_eq!(app.store.load().unwrap().inboxes.len(), 1);
     }
 
     #[test]

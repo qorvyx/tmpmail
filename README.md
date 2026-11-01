@@ -304,7 +304,9 @@ tmpmail otp --wait -a                 # a code arriving at any of them
 
 A label belongs to one inbox: `new -l`, `login -l`, the MCP server's `create_inbox`, the TUI
 and the desktop app refuse one that another inbox already has (or has as its address or local
-part), and `rotate --keep` moves the label to the new inbox.
+part), and `rotate --keep` moves the label to the new inbox. A new or logged-in address can't
+be named after another inbox's label either (`new -u work` while another inbox is `work`), and
+a label always wins over a local part in `-i`.
 
 ### Log back in
 

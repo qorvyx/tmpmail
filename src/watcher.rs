@@ -226,10 +226,17 @@ impl Watcher {
         opts: &CreateOpts,
         label: Option<String>,
     ) -> std::result::Result<String, String> {
+        // Checked against the file: another tmpmail may have added a label
+        // since this one last read it.
+        let fresh = self.app.store.load().ok();
+        let state = fresh.as_ref().unwrap_or(&self.app.state);
         if let Some(l) = &label {
-            self.app
-                .state
-                .check_label(l, None)
+            state.check_label(l, None).map_err(|e| e.to_string())?;
+        }
+        if let Some(u) = &opts.user {
+            let address = opts.domain.as_ref().map(|d| format!("{u}@{d}"));
+            state
+                .check_user(u, address.as_deref())
                 .map_err(|e| e.to_string())?;
         }
         let mut inbox = self
@@ -237,6 +244,7 @@ impl Watcher {
             .create_with_fallback(provider, None, opts)
             .map_err(|e| format!("could not create an inbox: {e}"))?;
         inbox.label = label;
+        let _ = self.app.note_label_clash(&inbox);
         let address = inbox.address.clone();
         let (state, ()) = self
             .app

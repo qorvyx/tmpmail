@@ -184,6 +184,7 @@ impl Server<'_> {
             .app
             .create_with_fallback(a.provider.as_deref(), None, &opts)?;
         inbox.label = a.label;
+        let clash = self.app.note_label_clash(&inbox);
         let added = inbox.clone();
         // Leave the user's active inbox alone: agents name theirs explicitly.
         self.app.state = self
@@ -201,6 +202,9 @@ impl Server<'_> {
         let mut v = serde_json::to_value(self.app.view(&inbox)).expect("serializable");
         v["provider_name"] = json!(p.name());
         v["lifetime"] = json!(p.caps().lifetime);
+        if let Some(note) = clash {
+            v["note"] = json!(note);
+        }
         Ok(v)
     }
 

@@ -531,29 +531,19 @@ impl App {
         if !failures.is_empty() {
             // Those that answered don't have the domain: only the
             // unreachable ones might, so name them, not "all providers".
-            let all_unreachable = failures
+            let down: Vec<(&str, &str)> = failures
                 .iter()
-                .all(|(_, e)| matches!(e, Error::Unreachable { .. }));
-            if let (Some(domain), false, true) =
-                (&opts.domain, unavailable.is_empty(), all_unreachable)
-            {
-                let ids: Vec<&str> = failures.iter().map(|(id, _)| *id).collect();
-                let why: Vec<String> = failures
-                    .iter()
-                    .map(|(id, e)| match e {
-                        Error::Unreachable { detail, .. } if ids.len() == 1 => detail.clone(),
-                        Error::Unreachable { detail, .. } => format!("{id}: {detail}"),
-                        e => e.to_string(),
-                    })
-                    .collect();
-                return Err(Error::Unreachable {
-                    provider: ids.join(", "),
-                    detail: format!(
-                        "{}; the other providers don't offer {domain:?}: {}",
-                        why.join("; "),
-                        unavailable.join("; ")
-                    ),
-                });
+                .filter_map(|(id, e)| match e {
+                    Error::Unreachable { detail, .. } => Some((*id, detail.as_str())),
+                    _ => None,
+                })
+                .collect();
+            if let (Some(domain), false, true) = (
+                &opts.domain,
+                unavailable.is_empty(),
+                down.len() == failures.len(),
+            ) {
+                return Err(unknown_domain_error(domain, &down, &unavailable));
             }
             let errors: Vec<String> = failures.iter().map(|(_, e)| e.to_string()).collect();
             return Err(Error::Unreachable {
@@ -824,6 +814,29 @@ pub(crate) fn relative(t: DateTime<Utc>) -> String {
     }
 }
 
+/// The error for a domain no reachable provider offers while the others
+/// (`down`: id and reason) couldn't be reached: those might have it, so it
+/// names them (exit 3) and adds what the others answered after the
+/// parenthesis.
+fn unknown_domain_error(domain: &str, down: &[(&str, &str)], unavailable: &[String]) -> Error {
+    let ids: Vec<&str> = down.iter().map(|(id, _)| *id).collect();
+    let why: Vec<String> = down
+        .iter()
+        .map(|(id, detail)| match ids.len() {
+            1 => detail.to_string(),
+            _ => format!("{id}: {detail}"),
+        })
+        .collect();
+    Error::Unreachable {
+        provider: ids.join(", "),
+        detail: why.join("; "),
+    }
+    .with_note(format!(
+        "the other providers don't offer {domain:?}: {}",
+        unavailable.join("; ")
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,6 +977,32 @@ mod tests {
             "in 30m"
         );
         assert_eq!(relative(now - chrono::Duration::days(3)), "3d ago");
+    }
+
+    #[test]
+    fn an_unknown_domain_names_the_unreachable_provider_outside_its_parenthesis() {
+        let down = |id| (id, "connection failed: refused");
+        let unavailable = vec![
+            "mailtm: domain \"x.example\" not available, choose one of: a.com".to_string(),
+            "dropmail: domain \"x.example\" not available, choose one of: b.com".to_string(),
+        ];
+        let e = unknown_domain_error("x.example", &[down("mailgw")], &unavailable);
+        assert_eq!(
+            e.to_string(),
+            "mailgw: unreachable (connection failed: refused); the other providers don't offer \
+             \"x.example\": mailtm: domain \"x.example\" not available, choose one of: a.com; \
+             dropmail: domain \"x.example\" not available, choose one of: b.com"
+        );
+        assert_eq!((e.kind(), e.exit_code()), ("unreachable", 3));
+        let two = [down("mailgw"), down("mailtm")];
+        let e = unknown_domain_error("x.example", &two, &unavailable[1..]);
+        assert!(
+            e.to_string().starts_with(
+                "mailgw, mailtm: unreachable (mailgw: connection failed: refused; \
+                 mailtm: connection failed: refused); the other"
+            ),
+            "{e}"
+        );
     }
 
     #[test]

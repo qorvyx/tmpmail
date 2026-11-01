@@ -184,12 +184,13 @@ impl App {
                     .collect();
                 self.json_out(&json!({ "inboxes": all }));
             }
-            return Ok(());
+            return self.unless_all_failed(sections);
         }
 
         let total = sections.len();
-        for (k, (address, created, result)) in sections.into_iter().enumerate() {
-            let inbox = self.state.position(&address).map(|n| self.inbox_option(n));
+        for (k, (address, created, result)) in sections.iter().enumerate() {
+            let created = *created;
+            let inbox = self.state.position(address).map(|n| self.inbox_option(n));
             if k > 0 {
                 println!();
             }
@@ -203,7 +204,7 @@ impl App {
                 );
                 println!(
                     "{}  {}",
-                    self.bold(&format!("[ Inbox for {} ]", clean_line(&address))),
+                    self.bold(&format!("[ Inbox for {} ]", clean_line(address))),
                     self.dim(&since),
                 );
             }
@@ -216,17 +217,37 @@ impl App {
                         );
                     }
                 }
-                Ok(list) => self.print_list(&list),
+                Ok(list) => self.print_list(list),
                 Err(e) => println!(
                     "{}",
                     self.dim(&format!("  unavailable: {}", clean_line(&e.to_string())))
                 ),
             }
         }
-        if total > 1 && !self.global.quiet {
+        let any_read = sections.iter().any(|(_, _, r)| r.is_ok());
+        if total > 1 && any_read && !self.global.quiet {
             self.note("\nread one with: tmpmail -i ADDRESS read N");
         }
-        Ok(())
+        self.unless_all_failed(sections)
+    }
+
+    /// `ls -a` fails when no inbox could be read, with the first one's
+    /// error for the exit code. Each error is in the listing already, so
+    /// it isn't printed again.
+    fn unless_all_failed(
+        &mut self,
+        sections: Vec<(String, DateTime<Utc>, Result<Vec<Summary>>)>,
+    ) -> Result<()> {
+        if sections.iter().any(|(_, _, r)| r.is_ok()) {
+            return Ok(());
+        }
+        match sections.into_iter().find_map(|(_, _, r)| r.err()) {
+            Some(e) => {
+                self.error_shown = true;
+                Err(e)
+            }
+            None => Ok(()),
+        }
     }
 
     fn print_list(&self, list: &[Summary]) {
@@ -881,7 +902,7 @@ impl App {
     fn save(&mut self, a: SaveArgs) -> Result<()> {
         let (wanted, out_dir) = (&a.attachments, &a.output);
         std::fs::create_dir_all(out_dir).map_err(anyhow::Error::from)?;
-        let saved = self.with_message(Some(&a.id), |p, inbox, id| {
+        let (saved, failed) = self.with_message(Some(&a.id), |p, inbox, id| {
             let msg = p.get(inbox, id)?;
             let selected: Vec<_> = msg
                 .attachments
@@ -895,24 +916,64 @@ impl App {
                     "no matching attachments in message {id}"
                 )));
             }
-            let mut saved = Vec::new();
+            // One the provider can't find (mail.tm refuses names with a
+            // `/`) doesn't stop the others; a provider or disk failure does.
+            let (mut saved, mut failed) = (Vec::new(), Vec::new());
             for (n, att) in selected.iter().enumerate() {
-                let data = p.attachment(inbox, &msg, att)?;
                 let name = safe_filename(&att.filename, &format!("attachment-{}", n + 1));
-                let path = unique_path(&out_dir.join(&name));
-                std::fs::write(&path, &data).map_err(anyhow::Error::from)?;
-                saved.push(path);
+                let result = p.attachment(inbox, &msg, att).and_then(|data| {
+                    let path = unique_path(&out_dir.join(&name));
+                    if let Err(e) = std::fs::write(&path, &data) {
+                        let _ = std::fs::remove_file(&path);
+                        return Err(anyhow::anyhow!("cannot write {}: {e}", path.display()).into());
+                    }
+                    Ok(path)
+                });
+                match result {
+                    Ok(path) => saved.push(path),
+                    Err(e @ Error::NotFound(_)) => failed.push((att.id.clone(), name, e)),
+                    // Nothing done yet: the usual error.
+                    Err(e) if saved.is_empty() && failed.is_empty() => return Err(e),
+                    Err(e) => {
+                        failed.push((att.id.clone(), name, e));
+                        break;
+                    }
+                }
             }
-            Ok(saved)
+            Ok((saved, failed))
         })?;
         if self.global.json {
-            self.json_out(&json!({ "saved": saved }));
+            let failures: Vec<Value> = failed
+                .iter()
+                .map(|(id, name, e)| {
+                    json!({
+                        "id": id,
+                        "filename": name,
+                        "error": { "kind": e.kind(), "message": format!("{e:#}") },
+                    })
+                })
+                .collect();
+            let mut v = json!({ "saved": saved });
+            if !failures.is_empty() {
+                v["failed"] = json!(failures);
+            }
+            self.json_out(&v);
         } else {
-            for p in saved {
+            for p in &saved {
                 println!("{}", p.display());
             }
+            for (_, name, e) in &failed {
+                self.warn(&format!("could not save {name}: {e:#}"));
+            }
         }
-        Ok(())
+        match failed.into_iter().next() {
+            Some((_, _, e)) => {
+                // Shown above with what was saved; the exit code still tells.
+                self.error_shown = true;
+                Err(e)
+            }
+            None => Ok(()),
+        }
     }
 
     fn delete(&mut self, a: DeleteArgs) -> Result<()> {
@@ -1571,6 +1632,115 @@ mod tests {
         app.run(Command::Login(login)).unwrap();
         let said: Vec<String> = rx.try_iter().collect();
         assert!(said.iter().any(|w| w.contains("public")), "{said:?}");
+    }
+
+    /// One message with two attachments, of which only `note.txt` can be
+    /// fetched (mail.tm refuses names with a `/`); listing fails when `down`.
+    struct Files {
+        down: bool,
+    }
+
+    impl Provider for Files {
+        fn id(&self) -> &'static str {
+            "fake"
+        }
+        fn name(&self) -> &'static str {
+            "Fake"
+        }
+        fn website(&self) -> &'static str {
+            ""
+        }
+        fn caps(&self) -> Capabilities {
+            Fixed {
+                mail: Vec::new(),
+                deletes: false,
+            }
+            .caps()
+        }
+        fn domains(&self) -> Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        fn create(&self, _: &CreateOpts) -> Result<Inbox> {
+            unimplemented!()
+        }
+        fn list(&self, _: &mut Inbox) -> Result<Vec<Summary>> {
+            if self.down {
+                return Err(Error::Unreachable {
+                    provider: "fake".into(),
+                    detail: "down".into(),
+                });
+            }
+            Ok(vec![
+                self.get(&mut Inbox::new("fake", "a@x.com".into(), Value::Null), "m")?
+                    .summary(),
+            ])
+        }
+        fn get(&self, _: &mut Inbox, id: &str) -> Result<Message> {
+            let att = |id: &str, name: &str| crate::provider::Attachment {
+                id: id.into(),
+                filename: name.into(),
+                ..Default::default()
+            };
+            Ok(Message {
+                id: id.into(),
+                attachments: vec![att("1", "../../etc/evil name.txt"), att("2", "note.txt")],
+                ..Default::default()
+            })
+        }
+        fn attachment(
+            &self,
+            _: &mut Inbox,
+            _: &Message,
+            att: &crate::provider::Attachment,
+        ) -> Result<Vec<u8>> {
+            match att.id.as_str() {
+                "2" => Ok(b"hello".to_vec()),
+                _ => Err(Error::NotFound("fake: not found (HTTP 404)".into())),
+            }
+        }
+    }
+
+    #[test]
+    fn save_keeps_going_past_a_failed_attachment() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("sv");
+        let mut app = App::for_test(dir.path().join("state"));
+        app.set_provider(Box::new(Files { down: false }));
+        let inbox = Inbox::new("fake", "a@x.com".into(), Value::Null);
+        app.state = app.store.update(|s| s.add(inbox)).unwrap().0;
+        app.global.json = true;
+        let save = SaveArgs {
+            id: "1".into(),
+            attachments: Vec::new(),
+            output: out.clone(),
+        };
+        let err = app.run(Command::Save(save)).unwrap_err();
+        assert!(matches!(err, Error::NotFound(_)), "{err}");
+        // The JSON document (saved + failed) was printed instead.
+        assert!(app.error_shown());
+        assert_eq!(std::fs::read(out.join("note.txt")).unwrap(), b"hello");
+        let files: Vec<_> = std::fs::read_dir(&out).unwrap().collect();
+        assert_eq!(files.len(), 1, "only note.txt");
+    }
+
+    #[test]
+    fn ls_all_fails_when_no_inbox_can_be_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_test(dir.path().to_path_buf());
+        app.set_provider(Box::new(Files { down: true }));
+        let inbox = Inbox::new("fake", "a@x.com".into(), Value::Null);
+        app.state = app.store.update(|s| s.add(inbox)).unwrap().0;
+        app.global.json = true;
+        let err = app
+            .run(Command::Ls(LsArgs { all_inboxes: true }))
+            .unwrap_err();
+        assert_eq!(err.exit_code(), 3);
+        assert!(app.error_shown());
+
+        let mut app = App::for_test(dir.path().to_path_buf());
+        app.set_provider(Box::new(Files { down: false }));
+        app.state = app.store.load().unwrap();
+        assert!(app.run(Command::Ls(LsArgs { all_inboxes: true })).is_ok());
     }
 
     #[test]

@@ -93,7 +93,7 @@ when the provider marks it read itself.
 
 | Option | Short | Explanation |
 |---|---|---|
-| `--all-inboxes` | `-a` | List the messages of **every** saved inbox, one section per address. An inbox whose provider is down shows `unavailable: ...` instead of stopping the others. |
+| `--all-inboxes` | `-a` | List the messages of **every** saved inbox, one section per address. An inbox whose provider is down shows `unavailable: ...` instead of stopping the others. If no inbox could be read, the exit code is the first one's error (3 when its provider is unreachable). |
 
 ### `read`: show a message
 
@@ -233,6 +233,11 @@ Supported by mail.tm, mail.gw, DropMail and Guerrilla.
 | `ID` | | Which message (required). |
 | `ATTACHMENTS...` | | Attachment ids or file names to save. All of them if omitted. |
 | `--output DIR` | `-o` | Folder to save into. Default: current folder. Existing files are never overwritten; a `(1)` is added instead. |
+
+An attachment the provider can't serve doesn't stop the others (mail.tm, for one, refuses one
+whose name contains `/`): the saved ones are printed, each failure is told on stderr (`failed`
+in `--json`), and the exit code is the first failure's. A provider or disk failure stops the
+rest; before anything is saved it is reported as a plain error.
 
 ```sh
 tmpmail save 1 -o ~/Downloads

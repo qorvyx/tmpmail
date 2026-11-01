@@ -40,7 +40,9 @@ Credentials are never printed.
 `ls` returns `{"address": "...", "created_at": "RFC 3339", "messages": [Summary, ...]}`, newest first.
 
 `ls --all-inboxes` returns `{"inboxes": [{"address", "created_at", "messages": [...], "error"?}, ...]}`.
-`error` (`{"kind", "message"}`) is present only for an inbox that couldn't be read.
+`error` (`{"kind", "message"}`) is present only for an inbox that couldn't be read. When none
+could, the document is printed the same way and the exit code is the first inbox's error's
+(3 for an unreachable provider).
 
 `from` and `subject` (and, in a full message, `to` and attachment file names) are decoded
 the same way with every provider: RFC 2047 encoded-words such as `=?utf-8?q?Zo=C3=AB?=`
@@ -101,7 +103,7 @@ only report whole kilobytes, so their sizes are rounded up to a multiple of 1024
 | `wait --link` | `{"link", "inbox", "message_id"}` |
 | `links` | `{"links": [...], "message_id"}` |
 | `attachments` | `{"message_id", "attachments": [...]}` |
-| `save` | `{"saved": ["path", ...]}` |
+| `save` | `{"saved": ["path", ...]}`, plus `"failed": [{"id", "filename", "error": {"kind", "message"}}]` when some attachments couldn't be saved and the others were tried (`filename` is the name it would have been saved as) (the exit code is then the first failure's, and no separate `error` document follows) |
 | `delete` | `{"deleted": N}` |
 | `drop` | `{"dropped": "address", "active": "address or null"}` |
 | `copy` | `{"copied": "address"}` |

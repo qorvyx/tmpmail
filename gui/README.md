@@ -410,7 +410,8 @@ in `tauri.conf.json`:
    app inside the DMG is checked with `codesign --verify --deep --strict` (the DMG is
    mounted with any license agreement answered, and a warning is printed if it has one).
 4. One publish job writes `SHA256SUMS`, attests every file
-   (`gh attestation verify FILE --repo qorvyx/tmpmail`), and creates a **pre-release**
+   (`gh attestation verify FILE --repo qorvyx/tmpmail --signer-workflow
+   qorvyx/tmpmail/.github/workflows/gui-release.yml`), and creates a **pre-release**
    titled "tmpmail desktop X.Y.Z (preview)", never marked latest (the CLI's release stays
    the latest), with `RELEASE_NOTES.md` as its notes.
 

@@ -1,6 +1,7 @@
 # Builds the desktop app's installers on a `gui-v*` tag and publishes them as
 # a GitHub pre-release with SHA256SUMS. Every file gets a build provenance
-# attestation, checked with `gh attestation verify FILE --repo qorvyx/tmpmail`.
+# attestation, checked with `gh attestation verify FILE --repo qorvyx/tmpmail
+# --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`.
 # Running it by hand (workflow_dispatch) only builds, as a dry run; the
 # installers are then in the run's artifacts.
 # The CLI's release.yml runs on `v*`, which `gui-v*` doesn't match, and this

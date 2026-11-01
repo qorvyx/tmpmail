@@ -47,8 +47,12 @@ runtime linked in, so no Visual C++ Redistributable needed since 0.3.1). Each re
 from this repository by the release workflow:
 
 ```sh
-gh attestation verify tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail
+gh attestation verify tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
+  --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml
 ```
+
+`--signer-workflow` checks that the CLI's release workflow made it (the desktop app's files
+are attested by `gui-release.yml`).
 
 Nothing else is needed at runtime. Optional extras: `wl-copy`, `xclip`, `xsel` or `pbcopy`
 for `copy` (Windows has `clip.exe`), a browser for `read --html` (found through `xdg-open`,
@@ -164,7 +168,8 @@ It is a **preview**. **Tested on** (more in [the app's README](gui/README.md#tes
 On X11 only KDE has been tried; other X11 desktops are still to test. Downloads are on the
 [releases page](https://github.com/qorvyx/tmpmail/releases), under the `gui-v*` releases
 (`https://github.com/qorvyx/tmpmail/releases/download/gui-vVERSION/FILE`), each with
-`SHA256SUMS` and a build attestation (`gh attestation verify FILE --repo qorvyx/tmpmail`):
+`SHA256SUMS` and a build attestation (`gh attestation verify FILE --repo qorvyx/tmpmail
+--signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`):
 
 | System | File |
 |---|---|

@@ -9,9 +9,10 @@ on:
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
+# Actions are pinned by commit SHA, with the tag in a comment. Only the
+# report job, which builds nothing, may write issues.
 permissions:
   contents: read
-  issues: write
 jobs:
   smoke:
     strategy:
@@ -20,9 +21,13 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch, 2026-10-31
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # `shell: bash` adds pipefail, so tee doesn't hide a failure. On
       # Windows it is Git Bash.
       - run: ./scripts/smoke.sh 2>&1 | tee smoke.log
@@ -31,7 +36,7 @@ jobs:
         if: always()
         shell: bash
         run: echo "${{ job.status }}" > status
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: smoke-${{ runner.os }}
@@ -43,8 +48,10 @@ jobs:
     needs: smoke
     if: always()
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           path: logs

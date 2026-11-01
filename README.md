@@ -477,7 +477,10 @@ config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
   deleted after a day. They are written to `view/` in the state folder, readable only by
   you (`0600` in a `0700` folder); when the browser is a snap (Firefox on Ubuntu and
   Kubuntu), which can't read hidden folders in your home, to `~/snap/NAME/common/tmpmail-view/`
-  instead, the one place outside its sandbox it may always read.
+  instead, the one place outside its sandbox it may always read. The snap can write there,
+  so that folder is used through open folder handles (a link put anywhere on the way is
+  refused, and the state folder used instead), and only tmpmail's own `tmpmail-*.html`
+  copies there are ever deleted.
 - Attachment names are sanitized so they can't escape the target directory, and
   existing files are never overwritten.
 - `tmpmail mcp` hands message contents to an AI agent. Anyone can mail a temp address, so

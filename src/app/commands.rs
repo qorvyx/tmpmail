@@ -322,8 +322,11 @@ impl App {
         self.mark_read_noting(n, &id);
         if a.html {
             let inline = self.inline_images(n, &msg);
-            let path = self.open_html(&msg, a.images, &inline)?;
-            self.note(&format!("opened {}", path.display()));
+            let view = self.open_html(&msg, a.images, &inline)?;
+            if let Some(note) = &view.note {
+                self.warn(note);
+            }
+            self.note(&format!("opened {}", view.path.display()));
             return Ok(());
         }
         if self.global.json {
@@ -464,14 +467,14 @@ impl App {
     }
 
     /// Writes the message's sanitized HTML to a private file, opens it in
-    /// the browser and returns the file's path. `inline` has the `data:`
+    /// the browser and returns the file. `inline` has the `data:`
     /// URLs of its `cid:` images ([`App::inline_images`]).
     pub(crate) fn open_html(
         &self,
         msg: &Message,
         images: bool,
         inline: &HashMap<String, String>,
-    ) -> Result<std::path::PathBuf> {
+    ) -> Result<system::View> {
         let html = match (&msg.html, &msg.text) {
             (Some(h), _) => h.clone(),
             (None, Some(t)) => format!("<pre>{}</pre>", crate::render::escape_html(t)),
@@ -480,9 +483,9 @@ impl App {
         let doc = safe_html_document_inline(&msg.subject, &html, images, inline);
         let name = format!("{}.html", safe_filename(&msg.id, "message"));
         let browser = self.browser();
-        let path = system::write_view(self.store.dir(), browser.as_deref(), &name, &doc)?;
-        system::open(&path.to_string_lossy(), browser.as_deref())?;
-        Ok(path)
+        let view = system::write_view(self.store.dir(), browser.as_deref(), &name, &doc)?;
+        system::open(&view.path.to_string_lossy(), browser.as_deref())?;
+        Ok(view)
     }
 
     // ----- wait / otp / links -----

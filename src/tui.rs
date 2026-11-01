@@ -720,7 +720,10 @@ impl Ui {
             KeyCode::Char('o') => {
                 if let Some(msg) = self.message().cloned() {
                     match app.open_html(&msg, false, &Default::default()) {
-                        Ok(_) => self.say("opened the message in the browser"),
+                        Ok(view) => match view.note {
+                            Some(note) => self.say(format!("opened the message ({note})")),
+                            None => self.say("opened the message in the browser"),
+                        },
                         Err(e) => self.say(format!("could not open the message: {e}")),
                     }
                 }

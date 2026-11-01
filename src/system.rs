@@ -496,17 +496,41 @@ const VIEW_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
 #[cfg(target_os = "linux")]
 const SNAP_VIEWS: &str = "tmpmail-view";
 
+/// The start of every view file's name. In a snap's folder only files
+/// named so are ever deleted.
+const VIEW_PREFIX: &str = "tmpmail-";
+
+/// Whether a file in a snap's view folder is a copy tmpmail wrote.
+#[cfg(target_os = "linux")]
+fn is_snap_view(name: &str) -> bool {
+    name.starts_with(VIEW_PREFIX) && name.ends_with(".html")
+}
+
+/// Whether a file in the state folder's `view` is a copy tmpmail wrote:
+/// everything there is, and versions before 0.3.5 named them `ID.html`.
+fn is_state_view(name: &str) -> bool {
+    name.ends_with(".html")
+}
+
+/// A view file written for the browser, and why it isn't where the
+/// browser would read it best, if so.
+pub struct View {
+    pub path: PathBuf,
+    pub note: Option<String>,
+}
+
 /// Writes a viewer file for `browser` (as [`open`] runs it), readable only
-/// by the user, and returns its path. It goes to `view` in the state
-/// folder, except for a browser installed as a snap (see [`view_dir`]).
-/// Copies left over from earlier views, in either place, are deleted once
-/// they are a day old.
+/// by the user, and returns its path, with a note to show the user when it
+/// isn't where a snap browser reads it best. It goes to `view` in the state
+/// folder, except for a browser installed as a snap (see [`write_view_in`]).
+/// Copies left over from earlier views are deleted once they are a day old,
+/// in the state folder and in the folder written to.
 pub fn write_view(
     state: &Path,
     browser: Option<&str>,
     name: &str,
     contents: &str,
-) -> crate::error::Result<PathBuf> {
+) -> crate::error::Result<View> {
     #[cfg(target_os = "linux")]
     let snap = snap_browser(browser_cmd(browser).as_deref(), &Snapd::system());
     #[cfg(not(target_os = "linux"))]
@@ -514,113 +538,246 @@ pub fn write_view(
         let _ = browser;
         None
     };
-    let home = dirs::home_dir();
-    let views = view_dir(state, home.as_deref(), snap.as_deref());
-    let path = write_view_file(&views, name, contents)?;
-    for dir in view_dirs(state, home.as_deref()) {
-        prune_views(&dir, VIEW_MAX_AGE);
-    }
-    Ok(path)
+    write_view_in(
+        state,
+        dirs::home_dir().as_deref(),
+        snap.as_deref(),
+        name,
+        contents,
+    )
 }
 
-/// Where view files go: `view` in the state folder, or for a snap browser
-/// (the Firefox of Ubuntu and Kubuntu) `~/snap/NAME/common/tmpmail-view`.
-/// Snap confinement keeps a snap out of hidden folders in home (so
-/// `~/.local/state`), it has its own `/tmp`, and sees only its own part of
-/// `$XDG_RUNTIME_DIR`; its `~/snap/NAME/common` it may always read. (GNOME
-/// hands a file to a snap through the document portal, so the state folder
-/// worked there; KDE doesn't.)
-fn view_dir(state: &Path, home: Option<&Path>, snap: Option<&str>) -> PathBuf {
+/// [`write_view`] for a snap browser named `snap` (or none), with `home` as
+/// the home folder. Snap confinement keeps a snap out of hidden folders in
+/// home (so `~/.local/state`), it has its own `/tmp`, and sees only its own
+/// part of `$XDG_RUNTIME_DIR`; its `~/snap/NAME/common` it may always read,
+/// so a snap browser's copy goes to `~/snap/NAME/common/tmpmail-view`.
+/// (GNOME hands a file to a snap through the document portal, so the state
+/// folder worked there; KDE doesn't.)
+///
+/// The snap may write in `~/snap/NAME`, and swap any folder there for a
+/// link at any time. So that folder is reached through open folders, never
+/// by path: `~/snap` is opened (it may be the user's own link: no snap can
+/// write in it), then each of `NAME`, `common` and `tmpmail-view` inside
+/// the one before it, refusing a link, and the file is written, listed and
+/// deleted inside the open `tmpmail-view` folder, so a link put there later
+/// leads nowhere. If any of them is a link (or can't be opened or written
+/// in), the copy goes to the state folder instead, with a note saying why.
+fn write_view_in(
+    state: &Path,
+    home: Option<&Path>,
+    snap: Option<&str>,
+    name: &str,
+    contents: &str,
+) -> crate::error::Result<View> {
+    let name = format!("{VIEW_PREFIX}{name}");
     #[cfg(target_os = "linux")]
-    if let (Some(home), Some(name)) = (home, snap) {
-        return home.join("snap").join(name).join("common").join(SNAP_VIEWS);
-    }
-    let _ = (home, snap);
-    state.join("view")
+    let note = match (home, snap) {
+        (Some(home), Some(snap)) => {
+            let snaps = home.join("snap");
+            let tried = ViewDir::open(&snaps, &[snap, "common", SNAP_VIEWS]).and_then(|dir| {
+                let path = dir.write(&name, contents)?;
+                dir.prune(VIEW_MAX_AGE, is_snap_view);
+                Ok(path)
+            });
+            match tried {
+                Ok(path) => {
+                    prune_state_views(state);
+                    return Ok(View { path, note: None });
+                }
+                Err(e) => Some(format!(
+                    "{e}; the copy is in the state folder instead, which the {snap} snap may \
+                     not be able to read"
+                )),
+            }
+        }
+        _ => None,
+    };
+    #[cfg(not(target_os = "linux"))]
+    let note = {
+        let _ = (home, snap);
+        None
+    };
+    std::fs::create_dir_all(state).map_err(|e| anyhow!("create {}: {e}", state.display()))?;
+    let views = state.join("view");
+    let dir =
+        ViewDir::open(state, &["view"]).map_err(|e| anyhow!("open {}: {e}", views.display()))?;
+    let path = dir.write(&name, contents).map_err(|e| anyhow!("{}", e))?;
+    dir.prune(VIEW_MAX_AGE, is_state_view);
+    Ok(View { path, note })
 }
 
-/// Every folder view files may have been written to.
-fn view_dirs(state: &Path, home: Option<&Path>) -> Vec<PathBuf> {
-    let mut dirs = vec![state.join("view")];
+/// Prunes the state folder's view files, if it has any.
+#[cfg(target_os = "linux")]
+fn prune_state_views(state: &Path) {
+    if let Ok(dir) = ViewDir::open_existing(state, &["view"]) {
+        dir.prune(VIEW_MAX_AGE, is_state_view);
+    }
+}
+
+/// A folder view files go in, held open (on Unix) so that it can't be
+/// swapped for a link while it is used.
+struct ViewDir {
+    path: PathBuf,
+    #[cfg(unix)]
+    fd: std::os::fd::OwnedFd,
+}
+
+impl ViewDir {
+    /// Opens `base` (the user's own home or state folder, followed if it is
+    /// a link) and then each of `below` inside the one before, refusing a
+    /// link. The last is created if missing and made 0700.
+    fn open(base: &Path, below: &[&str]) -> std::io::Result<ViewDir> {
+        Self::open_at(base, below, true)
+    }
+
+    /// [`ViewDir::open`] without creating anything or changing its mode.
     #[cfg(target_os = "linux")]
-    if let Some(snaps) = home.map(|h| h.join("snap")) {
-        for entry in std::fs::read_dir(&snaps).into_iter().flatten().flatten() {
-            let dir = entry.path().join("common").join(SNAP_VIEWS);
-            if no_links_below(&snaps, &dir) {
-                dirs.push(dir);
+    fn open_existing(base: &Path, below: &[&str]) -> std::io::Result<ViewDir> {
+        Self::open_at(base, below, false)
+    }
+
+    #[cfg(unix)]
+    fn open_at(base: &Path, below: &[&str], create: bool) -> std::io::Result<ViewDir> {
+        use rustix::fs::{CWD, Mode, OFlags, fchmod, mkdirat, openat};
+        let failed = |what: &str, path: &Path, e: rustix::io::Errno| {
+            std::io::Error::new(
+                std::io::Error::from(e).kind(),
+                format!("{what} {}: {}", path.display(), std::io::Error::from(e)),
+            )
+        };
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+        let mut fd =
+            openat(CWD, base, flags, Mode::empty()).map_err(|e| failed("open", base, e))?;
+        let mut path = base.to_path_buf();
+        for (i, name) in below.iter().enumerate() {
+            path.push(name);
+            let last = i + 1 == below.len();
+            if last && create {
+                match mkdirat(&fd, *name, Mode::RWXU) {
+                    Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+                    Err(e) => return Err(failed("create", &path, e)),
+                }
+            }
+            fd = openat(&fd, *name, flags | OFlags::NOFOLLOW, Mode::empty()).map_err(|e| {
+                if e == rustix::io::Errno::LOOP || e == rustix::io::Errno::NOTDIR {
+                    std::io::Error::other(format!(
+                        "{} is a symbolic link or not a folder",
+                        path.display()
+                    ))
+                } else {
+                    failed("open", &path, e)
+                }
+            })?;
+        }
+        if create {
+            fchmod(&fd, Mode::RWXU).map_err(|e| failed("chmod", &path, e))?;
+        }
+        Ok(ViewDir { path, fd })
+    }
+
+    #[cfg(not(unix))]
+    fn open_at(base: &Path, below: &[&str], create: bool) -> std::io::Result<ViewDir> {
+        let mut path = base.to_path_buf();
+        for name in below {
+            path.push(name);
+        }
+        if create {
+            std::fs::create_dir_all(&path)?;
+        }
+        Ok(ViewDir { path })
+    }
+
+    /// Writes `name` new, readable only by the user, and returns its path.
+    /// A copy of the same message, or anything put in its place, goes
+    /// first; the file is then created new, which never follows a link.
+    fn write(&self, name: &str, contents: &str) -> std::io::Result<PathBuf> {
+        let path = self.path.join(name);
+        let failed = |what: &str, e: std::io::Error| {
+            std::io::Error::new(e.kind(), format!("{what} {}: {e}", path.display()))
+        };
+        let mut f = self.create_new(name).map_err(|e| failed("create", e))?;
+        f.write_all(contents.as_bytes())
+            .map_err(|e| failed("write", e))?;
+        Ok(path)
+    }
+
+    #[cfg(unix)]
+    fn create_new(&self, name: &str) -> std::io::Result<std::fs::File> {
+        use rustix::fs::{AtFlags, Mode, OFlags, openat, unlinkat};
+        match unlinkat(&self.fd, name, AtFlags::empty()) {
+            Ok(()) | Err(rustix::io::Errno::NOENT) => {}
+            Err(e) => return Err(e.into()),
+        }
+        let flags =
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let fd = openat(&self.fd, name, flags, Mode::RUSR | Mode::WUSR)?;
+        Ok(std::fs::File::from(fd))
+    }
+
+    #[cfg(not(unix))]
+    fn create_new(&self, name: &str) -> std::io::Result<std::fs::File> {
+        let path = self.path.join(name);
+        if std::fs::symlink_metadata(&path).is_ok() {
+            std::fs::remove_file(&path)?;
+        }
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+    }
+
+    /// Deletes the regular files older than `max_age` whose names `ours`
+    /// accepts. Best effort: a file that can't be inspected or removed is
+    /// left alone.
+    #[cfg(unix)]
+    fn prune(&self, max_age: Duration, ours: impl Fn(&str) -> bool) {
+        use rustix::fs::{AtFlags, Dir, FileType, statat, unlinkat};
+        let Ok(mut entries) = Dir::read_from(&self.fd) else {
+            return;
+        };
+        let now = SystemTime::now();
+        while let Some(Ok(entry)) = entries.read() {
+            let name = entry.file_name();
+            if !name.to_str().is_ok_and(&ours) {
+                continue;
+            }
+            let Ok(st) = statat(&self.fd, name, AtFlags::SYMLINK_NOFOLLOW) else {
+                continue;
+            };
+            // A time before 1970 (only someone else sets one) counts as old.
+            let old = u64::try_from(st.st_mtime)
+                .ok()
+                .and_then(|secs| SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(secs)))
+                .is_none_or(|modified| now.duration_since(modified).is_ok_and(|age| age > max_age));
+            if FileType::from_raw_mode(st.st_mode) == FileType::RegularFile && old {
+                let _ = unlinkat(&self.fd, name, AtFlags::empty());
             }
         }
     }
-    let _ = home;
-    dirs
-}
 
-/// Whether nothing from `base` (exclusive) down to `path` is a symbolic
-/// link. A snap may write in its own folder: it must not be able to point
-/// tmpmail's view folder somewhere else.
-fn no_links_below(base: &Path, path: &Path) -> bool {
-    let Ok(rest) = path.strip_prefix(base) else {
-        return false;
-    };
-    let mut at = base.to_path_buf();
-    rest.components().all(|c| {
-        at.push(c);
-        !std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink())
-    })
-}
-
-/// Writes a viewer file readable only by the user into `views` (made 0700)
-/// and returns its path. Neither the folder nor the file is followed if it
-/// is a symbolic link: a snap browser can write in the folder its copies
-/// go to.
-fn write_view_file(views: &Path, name: &str, contents: &str) -> crate::error::Result<PathBuf> {
-    let parent = views.parent().unwrap_or(views);
-    std::fs::create_dir_all(parent).map_err(|e| anyhow!("create {}: {e}", parent.display()))?;
-    match std::fs::create_dir(views) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(e) => return Err(anyhow!("create {}: {e}", views.display()).into()),
-    }
-    private_real_dir(views)?;
-    let path = views.join(name);
-    // A copy of the same message, or anything put in its place, goes first;
-    // then the file is created new, which never follows a link.
-    if std::fs::symlink_metadata(&path).is_ok() {
-        std::fs::remove_file(&path).map_err(|e| anyhow!("remove {}: {e}", path.display()))?;
-    }
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut f = opts
-        .open(&path)
-        .map_err(|e| anyhow!("open {}: {e}", path.display()))?;
-    f.write_all(contents.as_bytes())
-        .map_err(|e| anyhow!("write {}: {e}", path.display()))?;
-    Ok(path)
-}
-
-/// Makes `dir` 0700 if it is a real folder, refusing a symbolic link (the
-/// mode is set through the opened folder, so it can't be swapped for one
-/// in between).
-fn private_real_dir(dir: &Path) -> crate::error::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let f = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
-            .open(dir)
-            .map_err(|e| anyhow!("open {}: {e}", dir.display()))?;
-        f.set_permissions(std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| anyhow!("chmod {}: {e}", dir.display()))?;
-    }
     #[cfg(not(unix))]
-    let _ = dir;
-    Ok(())
+    fn prune(&self, max_age: Duration, ours: impl Fn(&str) -> bool) {
+        let Ok(entries) = std::fs::read_dir(&self.path) else {
+            return;
+        };
+        let now = SystemTime::now();
+        for entry in entries.flatten() {
+            if !entry.file_name().to_str().is_some_and(&ours) {
+                continue;
+            }
+            let old = entry
+                .metadata()
+                .ok()
+                .filter(|m| m.is_file())
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| now.duration_since(t).ok())
+                .is_some_and(|age| age > max_age);
+            if old {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
 }
 
 /// Where snapd puts things. Paths, so tests can point elsewhere.
@@ -773,26 +930,6 @@ fn snap_of_desktop_id(id: &str, snapd: &Snapd) -> Option<String> {
         .flatten()
 }
 
-/// Best effort: a file that can't be inspected or removed is left alone.
-fn prune_views(views: &Path, max_age: Duration) {
-    let Ok(entries) = std::fs::read_dir(views) else {
-        return;
-    };
-    let now = SystemTime::now();
-    for entry in entries.flatten() {
-        let old = entry
-            .metadata()
-            .ok()
-            .filter(|m| m.is_file())
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| now.duration_since(t).ok())
-            .is_some_and(|age| age > max_age);
-        if old {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -872,27 +1009,38 @@ mod tests {
         assert!(!marker.exists());
     }
 
-    #[test]
-    fn old_view_files_are_pruned() {
-        let dir = tempfile::tempdir().unwrap();
-        let views = dir.path().join("view");
-        let old = views.join("old.html");
-        let first = write_view_file(&views, "old.html", "x").unwrap();
-        assert_eq!(first, old);
+    /// Sets a file's modification time a day and a minute back.
+    fn age(path: &Path) {
         let day_ago = SystemTime::now() - VIEW_MAX_AGE - Duration::from_secs(60);
         std::fs::File::options()
             .write(true)
-            .open(&old)
+            .open(path)
             .unwrap()
             .set_modified(day_ago)
             .unwrap();
-        let new = write_view_file(&views, "new.html", "y").unwrap();
-        prune_views(&views, VIEW_MAX_AGE);
-        assert!(!old.exists());
-        assert!(new.exists());
+    }
+
+    #[test]
+    fn old_view_files_are_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let first = write_view_in(&state, None, None, "old.html", "x").unwrap();
+        assert_eq!(first.path, state.join("view/tmpmail-old.html"));
+        assert!(first.note.is_none());
+        // A copy named as earlier versions named them goes too.
+        let legacy = state.join("view/old.html");
+        std::fs::write(&legacy, "x").unwrap();
+        let keep = state.join("view/notes.txt");
+        std::fs::write(&keep, "x").unwrap();
+        for p in [&first.path, &legacy, &keep] {
+            age(p);
+        }
+        let new = write_view_in(&state, None, None, "new.html", "y").unwrap();
+        assert!(!first.path.exists() && !legacy.exists());
+        assert!(new.path.exists() && keep.exists());
         // Writing the same message again replaces its copy.
-        write_view_file(&views, "new.html", "z").unwrap();
-        assert_eq!(std::fs::read_to_string(&new).unwrap(), "z");
+        write_view_in(&state, None, None, "new.html", "z").unwrap();
+        assert_eq!(std::fs::read_to_string(&new.path).unwrap(), "z");
     }
 
     #[test]
@@ -901,16 +1049,16 @@ mod tests {
         use std::os::unix::fs::{PermissionsExt, symlink};
         let dir = tempfile::tempdir().unwrap();
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-        let views = dir.path().join("view");
-        let f = write_view_file(&views, "a.html", "x").unwrap();
-        assert_eq!(mode(&views), 0o700);
+        let views = ViewDir::open(dir.path(), &["view"]).unwrap();
+        let f = views.write("a.html", "x").unwrap();
+        assert_eq!(mode(&dir.path().join("view")), 0o700);
         assert_eq!(mode(&f), 0o600);
         // A link put in place of a copy is replaced, its target untouched.
         let victim = dir.path().join("victim");
         std::fs::write(&victim, "keep").unwrap();
         std::fs::remove_file(&f).unwrap();
         symlink(&victim, &f).unwrap();
-        write_view_file(&views, "a.html", "new").unwrap();
+        views.write("a.html", "new").unwrap();
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
         assert!(
             !std::fs::symlink_metadata(&f)
@@ -923,11 +1071,47 @@ mod tests {
         let elsewhere = dir.path().join("elsewhere");
         std::fs::create_dir(&elsewhere).unwrap();
         std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let linked = dir.path().join("linked");
-        symlink(&elsewhere, &linked).unwrap();
-        assert!(write_view_file(&linked, "a.html", "x").is_err());
+        symlink(&elsewhere, dir.path().join("linked")).unwrap();
+        let err = ViewDir::open(dir.path(), &["linked"]).err().unwrap();
+        assert!(err.to_string().contains("symbolic link"), "{err}");
         assert_eq!(mode(&elsewhere), 0o755);
-        assert!(!elsewhere.join("a.html").exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_folder_swapped_for_a_link_after_opening_leads_nowhere() {
+        // Security review A1, made deterministic: the snap swaps its folder
+        // for a link to another folder right after tmpmail opened it (the
+        // race the review won in a few rounds). Every write, listing and
+        // delete still happens in the folder that was opened.
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let common = dir.path().join("snap/evil/common");
+        std::fs::create_dir_all(common.join("tmpmail-view")).unwrap();
+        let docs = dir.path().join("Documents");
+        std::fs::create_dir(&docs).unwrap();
+        // The user's files, named as tmpmail names its copies, and old.
+        let theirs = docs.join("tmpmail-thesis.html");
+        std::fs::write(&theirs, "my thesis").unwrap();
+        age(&theirs);
+        let decoy = common.join("tmpmail-view").join("tmpmail-thesis.html");
+        std::fs::write(&decoy, "decoy").unwrap();
+        age(&decoy);
+
+        let views = ViewDir::open(dir.path(), &["snap", "evil", "common", "tmpmail-view"]).unwrap();
+        let moved = common.join("moved");
+        std::fs::rename(common.join("tmpmail-view"), &moved).unwrap();
+        symlink(&docs, common.join("tmpmail-view")).unwrap();
+
+        views.write("tmpmail-new.html", "mail").unwrap();
+        views.prune(VIEW_MAX_AGE, |n| n.starts_with(VIEW_PREFIX));
+        assert_eq!(std::fs::read_to_string(&theirs).unwrap(), "my thesis");
+        assert!(!docs.join("tmpmail-new.html").exists());
+        assert!(moved.join("tmpmail-new.html").exists());
+        assert!(
+            !moved.join("tmpmail-thesis.html").exists(),
+            "the decoy went"
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -1001,19 +1185,60 @@ mod tests {
     fn view_files_go_where_the_browser_can_read_them() {
         let dir = tempfile::tempdir().unwrap();
         let (state, home) = (dir.path().join("state"), dir.path().join("home"));
-        assert_eq!(view_dir(&state, Some(&home), None), state.join("view"));
-        let snap = home.join("snap/firefox/common/tmpmail-view");
-        assert_eq!(view_dir(&state, Some(&home), Some("firefox")), snap);
-        // Both places are pruned; a snap's folder only while no link leads
-        // out of `~/snap`.
+        let plain = write_view_in(&state, Some(&home), None, "1.html", "x").unwrap();
+        assert_eq!(plain.path, state.join("view/tmpmail-1.html"));
+        let snap = home.join("snap/firefox/common");
         std::fs::create_dir_all(&snap).unwrap();
+        let ff = write_view_in(&state, Some(&home), Some("firefox"), "2.html", "y").unwrap();
+        assert_eq!(ff.path, snap.join("tmpmail-view/tmpmail-2.html"));
+        assert!(ff.note.is_none());
+        // In the snap's folder only tmpmail's own copies are pruned.
+        let other = snap.join("tmpmail-view/thesis.html");
+        std::fs::write(&other, "z").unwrap();
+        age(&other);
+        age(&ff.path);
+        write_view_in(&state, Some(&home), Some("firefox"), "3.html", "y").unwrap();
+        assert!(other.exists() && !ff.path.exists());
+        // A link anywhere below `~/snap` means the state folder, with a
+        // note saying why.
         std::fs::create_dir_all(home.join("snap/evil")).unwrap();
         std::os::unix::fs::symlink(&state, home.join("snap/evil/common")).unwrap();
-        let dirs = view_dirs(&state, Some(&home));
+        let evil = write_view_in(&state, Some(&home), Some("evil"), "4.html", "y").unwrap();
+        assert_eq!(evil.path, state.join("view/tmpmail-4.html"));
+        let note = evil.note.unwrap();
+        assert!(note.contains("symbolic link"), "{note}");
+        assert!(!state.join("tmpmail-view").exists());
+        // So does one the snap can't be written in, and a copy dated
+        // before 1970 is pruned, not a crash.
+        std::fs::create_dir(snap.join("tmpmail-view/tmpmail-6.html")).unwrap();
+        let blocked = write_view_in(&state, Some(&home), Some("firefox"), "6.html", "y").unwrap();
+        assert_eq!(blocked.path, state.join("view/tmpmail-6.html"));
+        assert!(blocked.note.is_some());
+        let ancient = snap.join("tmpmail-view/tmpmail-7.html");
+        std::fs::write(&ancient, "x").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&ancient)
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH - Duration::from_secs(86400))
+            .unwrap();
+        write_view_in(&state, Some(&home), Some("firefox"), "8.html", "y").unwrap();
+        assert!(!ancient.exists());
+        // `~/snap` itself may be the user's own link (no snap can write
+        // in it).
+        let (home2, data) = (dir.path().join("home2"), dir.path().join("data"));
+        std::fs::create_dir_all(data.join("firefox/common")).unwrap();
+        std::fs::create_dir(&home2).unwrap();
+        std::os::unix::fs::symlink(&data, home2.join("snap")).unwrap();
+        let linked = write_view_in(&state, Some(&home2), Some("firefox"), "9.html", "y").unwrap();
+        assert!(linked.note.is_none(), "{:?}", linked.note);
         assert!(
-            dirs.contains(&state.join("view")) && dirs.contains(&snap),
-            "{dirs:?}"
+            data.join("firefox/common/tmpmail-view/tmpmail-9.html")
+                .exists()
         );
-        assert_eq!(dirs.len(), 2, "{dirs:?}");
+        // A snap that never ran (no `common` folder) too.
+        let none = write_view_in(&state, Some(&home), Some("chromium"), "5.html", "y").unwrap();
+        assert_eq!(none.path, state.join("view/tmpmail-5.html"));
+        assert!(none.note.is_some());
     }
 }

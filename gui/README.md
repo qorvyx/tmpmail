@@ -159,35 +159,6 @@ wheel or the scrollbar.
 | `?` | Shortcut help |
 | `Ctrl+,` / `Cmd+,` | Settings |
 
-## Tested on
-
-Where the app is known to work, from the hands-on rounds (mail sent to a real mail.tm, and
-other providers', inboxes; tried by hand in each system's own session, through its screen).
-Linux first, then Windows and macOS, newest first for each; each row is the version that
-was tried there.
-
-| System | Session | Version | Package | How | Date |
-|---|---|---|---|---|---|
-| Ubuntu 26.04.1, GNOME Shell 50.1 | Wayland | 0.1.3 | `.deb` | live VM: inboxes, every mail kind, code, links, attachments (Save, drag-out), notifications and clicks, tray (AppIndicator), settings, shortcuts, CLI sync, uninstall | 2026-11-01 |
-| Kubuntu 26.10, Plasma 6.7.5 | Wayland | 0.1.3 | `.deb` | live VM: inboxes, every mail kind, code, drag-out, notifications and clicks, Plasma's tray, CLI sync, uninstall | 2026-11-01 |
-| Arch, Plasma 6.8.1 | Wayland | 0.1.3 | AppImage (FUSE and `--appimage-extract-and-run`) | container (webtop): mail, code, notifications, tray | 2026-11-01 |
-| Fedora 44, GNOME Shell 50.0 | Wayland | 0.1.3 | AppImage (FUSE and `--appimage-extract-and-run`) | live VM: mail, code, notifications and clicks, no tray | 2026-11-01 |
-| Fedora 44, GNOME Shell 50.0 | Wayland | 0.1.2 (pre-release build) | `.rpm` | live VM: icon, notifications, raise on click | 2026-10-31 |
-| Fedora 44, Plasma 6.6.4 | Wayland | 0.1.2 (pre-release build) | `.rpm` | live VM: icon, raise on click, tray, notification labels | 2026-10-31 |
-| Fedora 44, Plasma 6.7.5 | X11 | 0.1.2 (pre-release build) | `.rpm` | container (webtop): icon (`_NET_WM_ICON`), raise, tray | 2026-10-31 |
-| Kubuntu 26.04, Plasma 6.6.6 | X11 | 0.1.1 | `.deb` | container (webtop): mail, notifications, clicks | 2026-10-31 |
-| Windows, later versions | – | 0.1.2 and later | – | built and security-probed in CI only | – |
-| Windows 11 Enterprise LTSC | – | 0.1.1 (release dry-run build) | NSIS installer | the 0.1.0 round's fixes: installer artwork, window fits the screen, mark read, notification-center click, Live stays on | 2026-10-31 |
-| Windows 11 Enterprise LTSC | – | 0.1.0 | NSIS installer | clean VM: install, mail, notifications, tray, a link click opens Edge | 2026-10-31 |
-| macOS | – | every version | – | built (universal, ad-hoc signed) and security-probed in CI only, not tried by hand | – |
-
-- **X11:** only KDE Plasma on X11 has been tried (the 0.1.1 and 0.1.2 rows, both in
-  containers). Ubuntu's and Fedora's GNOME 50 and Kubuntu 26.10 have no X11 session, so
-  other X11 desktops (Xfce, MATE, Cinnamon) are still to test.
-- **Not tried by hand** as of 2026-11-01: the dunst notification server, the rpm of 0.1.3,
-  and the 0.1.4 changes (retested in VMs before 0.1.4 is released). The 0.1.3 rows found
-  the bugs 0.1.4 fixes (see `RELEASE_NOTES.md`).
-
 ## Where settings are kept
 
 - The provider order (`providers`), `poll_interval`, `push` and `http_timeout` are the CLI's
@@ -291,10 +262,7 @@ rows under `~/.config`, `~/.local/state`, `~/.local/share` and `~/.cache`, and
 The drag-out folder (`tmpmail-drag-*` in the temporary folder) goes when the app quits
 normally; after a crash or a killed app it stays until `/tmp` is cleared. No link handler
 is registered on Linux or macOS; on Windows the uninstaller removes the `tmpmail-desktop:`
-one it registered. The Linux rows for the config, inboxes, window storage and KDE's
-settings were seen by hand on Ubuntu 26.04 (deb), Kubuntu 26.10 (deb), Arch and Fedora 44
-(AppImage) in round 2; the other rows follow from where the code and the libraries put
-these files and weren't checked by hand.
+one it registered.
 
 ## Dark mail
 

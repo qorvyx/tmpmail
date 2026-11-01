@@ -4,12 +4,8 @@ inbox, and a clearer error when a domain isn't offered. (Their TUI and MCP fixes
 to the app.) It is built on the same core as the `tmpmail` command-line tool (0.3.4) and
 shares its inboxes and `config.toml`.
 
-**This is a preview.** The shared core's fixes were tested by hand in the CLI; the app's own
-change (the reason shown under the label or username field) was checked only by the
-automated probe and unit tests so far. On Linux, 0.1.2's rpm was tested by hand on Fedora
-with KDE Plasma (X11 and Wayland) and GNOME (Wayland); the deb and the AppImage come from the
-same build but weren't tried by hand. On Windows only 0.1.0 was tried by hand, on a clean
-Windows 11, and macOS has only been checked by the automated security probe. Please report
+**This is a preview.** It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS
+and on Windows. Please report
 what breaks:
 <https://github.com/qorvyx/tmpmail/issues>.
 

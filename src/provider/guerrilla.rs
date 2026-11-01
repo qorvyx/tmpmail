@@ -133,6 +133,66 @@ fn attachments(v: &Value) -> Vec<Attachment> {
         .collect()
 }
 
+/// Guerrilla points images (`src`, `background`) at its own proxy, a path
+/// on its website (`/res.php?...&q=URL`), which means nothing in a page
+/// opened from a file, and the proxy only serves a placeholder outside a
+/// Guerrilla session. Each goes back to the image's own URL (`q`), or to
+/// the proxy's full URL if there is none. They still load only with
+/// `--images` (or the app's setting), like any provider's remote images.
+fn unproxy_images(html: &str, web: &str) -> String {
+    static PROXIED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r#"(?i)(\s(?:src|background)\s*=\s*)(?:"(/res\.php\?[^"]*)"|'(/res\.php\?[^']*)')"#,
+        )
+        .unwrap()
+    });
+    PROXIED
+        .replace_all(html, |c: &regex::Captures| {
+            let path = c
+                .get(2)
+                .or(c.get(3))
+                .map_or("", |m| m.as_str())
+                .replace("&amp;", "&")
+                .replace("&#38;", "&")
+                .replace("&#x26;", "&");
+            let original = path
+                .split_once('?')
+                .map_or("", |(_, q)| q)
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("q="))
+                .map(percent_decode)
+                .filter(|u| {
+                    let lower = u.to_ascii_lowercase();
+                    lower.starts_with("https://") || lower.starts_with("http://")
+                });
+            let url = original.unwrap_or_else(|| format!("{web}{path}"));
+            let quoted = url.replace('&', "&amp;").replace('"', "&quot;");
+            format!("{}\"{quoted}\"", &c[1])
+        })
+        .into_owned()
+}
+
+/// A query value as PHP's `urlencode` writes it: `%XX` bytes, `+` a space.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        match (bytes[i], bytes.get(i + 1), bytes.get(i + 2)) {
+            (b'%', Some(&h), Some(&l)) if hex(h).is_some() && hex(l).is_some() => {
+                out.push((hex(h).unwrap() * 16 + hex(l).unwrap()) as u8);
+                i += 3;
+            }
+            (b, _, _) => {
+                out.push(if b == b'+' { b' ' } else { b });
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Guerrilla HTML-escapes subjects and excerpts.
 fn decode_entities(s: &str) -> String {
     s.replace("&#039;", "'")
@@ -234,7 +294,7 @@ impl Provider for Guerrilla {
             date: s.date,
             // Even plain-text mail comes back HTML-escaped inside <pre>.
             text: None,
-            html: Some(body),
+            html: Some(unproxy_images(&body, &self.web)),
             attachments: attachments(&v),
         })
     }
@@ -268,6 +328,36 @@ impl Provider for Guerrilla {
 mod tests {
     use super::*;
     use mockito::{Matcher, Server};
+
+    #[test]
+    fn proxied_images_point_at_their_own_url() {
+        let html = r#"<p><img src="/res.php?r=1&amp;n=img&amp;q=https%3A%2F%2Fexample.com%2Fpixel.gif%3Fa%3D1%26b%3D2" alt="pixel.gif">
+            <IMG SRC='/res.php?r=1&amp;n=img'> <img src="https://cdn.example/x.png">
+            <img src="/res.php?q=javascript%3Aalert(1)">
+            <td background="/res.php?r=1&#38;q=https%3A%2F%2Fx.com%2Fo%27brien+bg.png">
+            <img src='/res.php?q=https%3A%2F%2Fx.com%2Fa%22b.png'></p>"#;
+        let out = unproxy_images(html, "https://www.guerrillamail.com");
+        assert!(
+            out.contains(
+                r#"<img src="https://example.com/pixel.gif?a=1&amp;b=2" alt="pixel.gif">"#
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"SRC="https://www.guerrillamail.com/res.php?r=1&amp;n=img""#),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"<img src="https://cdn.example/x.png">"#),
+            "{out}"
+        );
+        assert!(!out.contains(r#"src="javascript"#), "{out}");
+        assert!(
+            out.contains(r#"background="https://x.com/o'brien bg.png""#),
+            "{out}"
+        );
+        assert!(out.contains(r#"src="https://x.com/a&quot;b.png""#), "{out}");
+    }
 
     #[test]
     fn create_custom_user_and_read() {

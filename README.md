@@ -437,7 +437,8 @@ Environment: `TMPMAIL_PROVIDER` (comma list), `TMPMAIL_TIMEOUT`, `TMPMAIL_POLL_I
   (`~/.local/state/tmpmail`), directory `0700`, file `0600`, never in `/tmp`.
 - Message text is stripped of terminal control sequences before printing.
 - `read --html` writes a sanitized copy (no scripts, forms, frames; strict CSP) and
-  **blocks remote images** (tracking pixels) unless you pass `--images`. These copies are
+  **blocks remote images** (tracking pixels) unless you pass `--images` (then they load from
+  the sender's servers, Guerrilla Mail's too, not through its proxy). These copies are
   deleted after a day.
 - Attachment names are sanitized so they can't escape the target directory, and
   existing files are never overwritten.

@@ -106,7 +106,7 @@ the inbox isn't the active one (picked with `-i`, `TMPMAIL_INBOX`, or `wait -a`)
 | `ID` | | Which message (number, id or id prefix). Newest if omitted. |
 | `--recent` | `-r` | Explicitly the newest message. |
 | `--html` | | Open the HTML version in your browser. It is sanitized first: no scripts, forms or frames, links can't track you back. |
-| `--images` | | With `--html`: also load remote images. Off by default because they are often tracking pixels that tell the sender you opened the mail. |
+| `--images` | | With `--html`: also load remote images. Off by default because they are often tracking pixels that tell the sender you opened the mail. As with any remote content, the sender's servers then see your IP address and when you opened the mail. Guerrilla Mail points images at its own proxy, which only works inside a Guerrilla session; tmpmail points them back at each image's own URL so they load too. |
 | `--raw` | | Print the full raw email source (headers + MIME). Useful for debugging or `> mail.eml`. Supported by mail.tm, mail.gw, DropMail and Maildrop; Guerrilla and tempmail.lol don't offer it (exit 64). `providers` shows it as `raw`. |
 | `--no-pager` | | Print a long message straight to the terminal. By default a message taller than the terminal opens in a pager: `pager` from the config, else `$PAGER`, else `less`. On Windows, if neither is set and `less` isn't installed, the message is printed instead. |
 

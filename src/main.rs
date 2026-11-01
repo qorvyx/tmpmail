@@ -93,7 +93,7 @@ fn report(e: &Error, json: bool) {
     };
     if json {
         let v = serde_json::json!({ "error": { "kind": e.kind(), "message": msg } });
-        println!("{v}");
+        println!("{}", render::escape_json_invisible(&v.to_string()));
     } else {
         eprintln!("tmpmail: {}", render::clean_line(&msg));
     }

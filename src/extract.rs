@@ -273,12 +273,7 @@ fn normalized_url(raw: &str) -> String {
     out
 }
 
-/// The invisible characters a link may not hold as such: bidi controls and
-/// the other format characters, joiners and tag characters included.
-fn is_invisible(c: char) -> bool {
-    matches!(c, '\u{200C}' | '\u{200D}' | '\u{E0000}'..='\u{E007F}')
-        || crate::render::is_hidden_format(c)
-}
+use crate::render::is_invisible;
 
 /// Decodes HTML character references (`&amp;`, `&#38;`, `&#x26;`, and the
 /// few named ones URLs use); anything else is left as written.

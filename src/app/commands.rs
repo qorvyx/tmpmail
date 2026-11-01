@@ -913,7 +913,7 @@ impl App {
                     if self.global.json {
                         let mut v = serde_json::to_value(s).expect("serializable");
                         v["inbox"] = json!(address);
-                        println!("{v}");
+                        println!("{}", crate::render::escape_json_invisible(&v.to_string()));
                     } else {
                         println!("{line}");
                     }
@@ -1157,7 +1157,7 @@ impl App {
             self.json_out(&json!({ "provider": id, "domains": domains }));
         } else {
             for d in domains {
-                println!("{d}");
+                println!("{}", clean_line(&d));
             }
         }
         Ok(())

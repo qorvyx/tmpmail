@@ -242,8 +242,11 @@ impl App {
     }
 
     #[cfg(feature = "cli")]
+    /// Prints one JSON document, with invisible and control characters
+    /// escaped ([`crate::render::escape_json_invisible`]).
     fn json_out(&self, v: &impl Serialize) {
-        println!("{}", serde_json::to_string_pretty(v).expect("serializable"));
+        let text = serde_json::to_string_pretty(v).expect("serializable");
+        println!("{}", crate::render::escape_json_invisible(&text));
     }
 
     /// Messages can quote provider responses, so they are cleaned like mail.

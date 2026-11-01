@@ -63,8 +63,9 @@ type RpcResult = std::result::Result<Value, (i64, String)>;
 
 /// Writes one message; the stdout lock keeps replies from threads whole.
 fn send(msg: &Value) -> std::io::Result<()> {
+    let text = crate::render::escape_json_invisible(&msg.to_string());
     let mut out = std::io::stdout().lock();
-    writeln!(out, "{msg}")?;
+    writeln!(out, "{text}")?;
     out.flush()
 }
 
@@ -148,12 +149,14 @@ fn call(params: &Value, global: &Global, cancel: Arc<AtomicBool>) -> RpcResult {
     });
     Ok(match outcome {
         Ok(v) => json!({
-            "content": [{ "type": "text", "text": v.to_string() }],
+            // Escaped too: the client shows this text once it has read the
+            // reply, so the escapes of the reply itself are gone by then.
+            "content": [{ "type": "text", "text": crate::render::escape_json_invisible(&v.to_string()) }],
             "structuredContent": v,
             "isError": false,
         }),
         Err(e) => json!({
-            "content": [{ "type": "text", "text": format!("{} ({})", e, e.kind()) }],
+            "content": [{ "type": "text", "text": crate::render::clean_line(&format!("{} ({})", e, e.kind())) }],
             "isError": true,
         }),
     })

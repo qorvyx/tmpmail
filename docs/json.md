@@ -4,6 +4,14 @@ Every command accepts `--json`. Output goes to stdout. Timestamps are RFC 3339 i
 and absent values are `null`. Fields may be added later but won't be renamed or removed
 within a major version.
 
+Strings are written so that the output is plain to a terminal: every control character
+(C0, DEL and the C1 range U+0080–U+009F), bidi control (U+202A–U+202E, U+2066–U+2069,
+U+200E/F, U+061C), zero-width and other invisible format character, the line and paragraph
+separators U+2028/U+2029 and the Unicode tag characters is written as a `\uXXXX` escape
+(a surrogate pair past U+FFFF), whether stdout is a terminal or not. A JSON parser reads the
+same values as before: `"\u202e"` is the character U+202E. The MCP server writes its
+replies the same way.
+
 ## Errors (any command)
 
 ```json

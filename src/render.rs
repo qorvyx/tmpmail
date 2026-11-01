@@ -137,6 +137,42 @@ pub(crate) fn is_hidden_format(c: char) -> bool {
     )
 }
 
+/// JSON text with every control character (C0, DEL, C1), bidi control and
+/// other invisible format character written as a `\uXXXX` escape (a pair
+/// for one past U+FFFF), so the document shows nothing a terminal would
+/// act on or that would make a line read backwards; the values it holds
+/// are the same. Such characters can only be inside strings (the rest of
+/// JSON is ASCII), so every one in the text is escaped.
+pub fn escape_json_invisible(json: &str) -> String {
+    use std::fmt::Write;
+    // A raw line break is only ever JSON's own layout (serde writes one in
+    // a string as `\n`).
+    let hidden = |c: char| {
+        (c.is_control() && c != '\n') || matches!(c, '\u{2028}' | '\u{2029}') || is_invisible(c)
+    };
+    if !json.chars().any(hidden) {
+        return json.to_string();
+    }
+    let mut out = String::with_capacity(json.len() + 16);
+    for c in json.chars() {
+        if hidden(c) {
+            let mut units = [0u16; 2];
+            for u in c.encode_utf16(&mut units) {
+                let _ = write!(out, "\\u{u:04x}");
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The invisible characters: bidi controls and the other format characters
+/// ([`is_hidden_format`]), the joiners and the tag characters included.
+pub(crate) fn is_invisible(c: char) -> bool {
+    matches!(c, '\u{200C}' | '\u{200D}' | '\u{E0000}'..='\u{E007F}') || is_hidden_format(c)
+}
+
 /// Plain-text rendering of an HTML body, without loading anything remote.
 pub fn html_to_text(html: &str, width: usize) -> String {
     html2text::from_read(html.as_bytes(), width.max(20)).unwrap_or_else(|_| strip_tags(html))
@@ -1180,5 +1216,34 @@ mod tests {
             Some(&frame),
         );
         assert!(cjk.contains(r#"style="color:#333;padding:20px""#), "{cjk}");
+    }
+
+    #[test]
+    fn json_output_escapes_what_a_terminal_would_act_on() {
+        // Security review B3: 8-bit CSI/OSC, DEL, bidi and tag characters
+        // are escaped; the value read back is the same.
+        let subject = "a\u{9b}2J\u{9d}52;c;eA==\u{9c}\u{7f}\u{202E}b\u{E0041}\u{200B} \u{e9}";
+        let text =
+            serde_json::to_string_pretty(&serde_json::json!({ "subject": subject })).unwrap();
+        let out = escape_json_invisible(&text);
+        assert!(out.is_ascii() || out.chars().all(|c| !c.is_control() || c == '\n'));
+        for raw in [
+            '\u{9b}',
+            '\u{9d}',
+            '\u{9c}',
+            '\u{7f}',
+            '\u{202E}',
+            '\u{E0041}',
+            '\u{200B}',
+        ] {
+            assert!(!out.contains(raw), "{out}");
+        }
+        assert!(
+            out.contains("\\u009b") && out.contains("\\udb40\\udc41"),
+            "{out}"
+        );
+        assert!(out.contains('\u{e9}'), "plain letters stay: {out}");
+        let back: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(back["subject"], subject);
     }
 }

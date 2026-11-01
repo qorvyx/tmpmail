@@ -99,11 +99,8 @@ impl Store {
     }
 
     fn save(&self, state: &State) -> Result<()> {
-        let tmp = self.dir.join(format!(".state.json.{}", std::process::id()));
         let data = serde_json::to_vec_pretty(state).context("serialize state")?;
-        write_private(&tmp, &data)?;
-        fs::rename(&tmp, self.path()).context("replace state file")?;
-        Ok(())
+        write_private(&self.path(), &data)
     }
 }
 
@@ -300,20 +297,57 @@ pub fn create_private_dir(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Writes `path` readable only by the user (0600 on Unix), whole or not at
+/// all: the data goes to a new temporary file next to it (created with
+/// `O_EXCL` and `O_NOFOLLOW`, so nothing already there is written through)
+/// that then replaces `path`. A file it replaces, or a link put in its
+/// place, keeps neither its mode nor its target: the new file is its own.
 pub fn write_private(path: &Path, data: &[u8]) -> Result<()> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let dir = path.parent().unwrap_or(Path::new("."));
+    // Unique to this write: another thread may be writing the same file.
+    let mut name = std::ffi::OsString::from(".");
+    name.push(path.file_name().unwrap_or_default());
+    name.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let tmp = dir.join(name);
     let mut opts = fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
+        opts.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    let mut f = opts
-        .open(path)
-        .with_context(|| format!("open {}", path.display()))?;
-    f.write_all(data)
-        .with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    let written = (|| -> Result<()> {
+        let mut f = opts
+            .open(&tmp)
+            .with_context(|| format!("create {}", tmp.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Exactly 0600 even under an umask that strips the owner's bits.
+            f.set_permissions(fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("chmod {}", tmp.display()))?;
+        }
+        f.write_all(data)
+            .with_context(|| format!("write {}", tmp.display()))?;
+        f.sync_all()
+            .with_context(|| format!("sync {}", tmp.display()))?;
+        fs::rename(&tmp, path).with_context(|| format!("replace {}", path.display()))?;
+        // The rename itself, on disk (best effort).
+        #[cfg(unix)]
+        if let Ok(d) = fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+        Ok(())
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    written
 }
 
 #[cfg(test)]
@@ -486,5 +520,40 @@ mod tests {
         s.add(a);
         s.add(inbox("A@x.com"));
         assert_eq!(s.inboxes[0].read, ["1"]);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn private_writes_fix_the_mode_and_never_follow_links() {
+        // Security review A9.
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let dir = tempfile::tempdir().unwrap();
+        let mode = |p: &Path| fs::symlink_metadata(p).unwrap().permissions().mode() & 0o777;
+        let token = dir.path().join("dropmail-token.json");
+        fs::write(&token, "old").unwrap();
+        fs::set_permissions(&token, fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&token, b"new").unwrap();
+        assert_eq!(fs::read_to_string(&token).unwrap(), "new");
+        assert_eq!(mode(&token), 0o600);
+        // A link in its place is replaced, its target untouched.
+        let victim = dir.path().join("victim");
+        fs::write(&victim, "keep").unwrap();
+        fs::remove_file(&token).unwrap();
+        symlink(&victim, &token).unwrap();
+        write_private(&token, b"x").unwrap();
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+        assert!(
+            !fs::symlink_metadata(&token)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        // Nothing is left beside it.
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
     }
 }

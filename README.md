@@ -469,7 +469,8 @@ config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
 ## Privacy and security
 
 - State (addresses and their credentials) lives in `$XDG_STATE_HOME/tmpmail/state.json`
-  (`~/.local/state/tmpmail`), directory `0700`, file `0600`, never in `/tmp`.
+  (`~/.local/state/tmpmail`), directory `0700`, file `0600`, never in `/tmp`. It (and DropMail's token cache) is
+  written to a new file that replaces the old one, so a link in its place is replaced too.
 - Message text is stripped of terminal escape sequences (whole: `ESC[31m` goes, not only the
   ESC), control characters, bidi controls (U+202A–U+202E, U+2066–U+2069, U+200E/F, U+061C)
   and other invisible format characters before printing, so a sender can't rewrite your

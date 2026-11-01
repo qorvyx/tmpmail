@@ -1,5 +1,6 @@
 //! Pulling verification codes and links out of a message.
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -143,6 +144,14 @@ static URL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)\bhttps?://[^\s<>"'()\[\]{}]+"#).unwrap());
 static HREF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)href\s*=\s*["']([^"']+)["']"#).unwrap());
+/// What HTML loads rather than links to: `src`, `background`, `poster`,
+/// `srcset` (group 2) and CSS `url(...)`.
+static LOADED: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?is)\s(?:src|background|poster|lowsrc|dynsrc)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))|\ssrcset\s*=\s*(?:"([^"]*)"|'([^']*)')|url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]+))"#,
+    )
+    .unwrap()
+});
 static ACTION_WORDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)verif|confirm|activat|validat|magic|login|log-in|signin|sign-in|sign_in|auth|token|reset|password|invite|accept|register|onboard|otp|code").unwrap()
 });
@@ -151,23 +160,33 @@ static NOISE_WORDS: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// All http(s) links in the text and HTML bodies, deduplicated, with likely
-/// action links (verify, confirm, magic login, reset...) first.
+/// action links (verify, confirm, magic login, reset...) first. An address
+/// the HTML only loads (an image's `src`, `srcset` or `background`, a CSS
+/// `url(...)`) isn't a link a reader would open: it is left out, also when
+/// the text body repeats it, unless something links to it (`href`).
 pub fn links(text: &str, html: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
-    let mut push = |raw: &str| {
-        let url = raw
-            .replace("&amp;", "&")
-            .trim_end_matches(['.', ',', ';', ':', '!', '?', '>'])
-            .to_string();
-        if url.to_ascii_lowercase().starts_with("http") && !found.contains(&url) {
-            found.push(url);
-        }
-    };
     for c in HREF.captures_iter(html) {
-        push(&c[1]);
+        if let Some(url) = link_url(&c[1]) {
+            push_new(&mut found, url);
+        }
     }
+    let linked = found.len();
+    let mut loaded = HashSet::new();
+    for c in LOADED.captures_iter(html) {
+        let srcset = c.get(4).or(c.get(5));
+        let value = (1..=8).find_map(|i| c.get(i)).map_or("", |m| m.as_str());
+        let urls: Vec<&str> = match srcset {
+            Some(set) => srcset_urls(set.as_str()),
+            None => vec![value],
+        };
+        loaded.extend(urls.into_iter().filter_map(link_url));
+    }
+    loaded.retain(|u| !found[..linked].contains(u));
     for m in URL.find_iter(html).chain(URL.find_iter(text)) {
-        push(m.as_str());
+        if let Some(url) = link_url(m.as_str()).filter(|u| !loaded.contains(u)) {
+            push_new(&mut found, url);
+        }
     }
     let rank = |u: &str| -> i32 {
         let mut s = 0;
@@ -182,6 +201,42 @@ pub fn links(text: &str, html: &str) -> Vec<String> {
     // Stable sort keeps document order within the same rank.
     found.sort_by_key(|u| -rank(u));
     found
+}
+
+/// The addresses of a `srcset` (`URL 1x, URL 2x`): each candidate's
+/// address runs to a space, and may have commas in it; a comma at its end,
+/// or after its descriptors, starts the next candidate.
+fn srcset_urls(set: &str) -> Vec<&str> {
+    let mut urls = Vec::new();
+    let mut want_url = true;
+    for token in set.split_whitespace() {
+        if want_url {
+            urls.push(token.trim_end_matches(','));
+            want_url = token.ends_with(',');
+        } else if token.ends_with(',') {
+            want_url = true;
+        }
+    }
+    urls
+}
+
+/// An http(s) URL as written in mail, without the punctuation around it.
+fn link_url(raw: &str) -> Option<String> {
+    let url = raw
+        .trim()
+        .replace("&amp;", "&")
+        .trim_end_matches(['.', ',', ';', ':', '!', '?', '>'])
+        .to_string();
+    url.get(..4)
+        .is_some_and(|s| s.eq_ignore_ascii_case("http"))
+        .then_some(url)
+}
+
+/// Adds `url` to `list` unless it has it already.
+pub fn push_new(list: &mut Vec<String>, url: String) {
+    if !list.contains(&url) {
+        list.push(url);
+    }
 }
 
 #[cfg(test)]
@@ -253,6 +308,43 @@ mod tests {
         assert_eq!(l[0], "https://example.com/verify?token=abc&u=1");
         assert_eq!(l.iter().filter(|u| u.contains("verify")).count(), 1);
         assert!(l.contains(&"https://example.com/about".to_string()));
-        assert_eq!(l.last().unwrap(), "https://cdn.example.com/logo.png");
+        // An image isn't a link.
+        assert!(!l.iter().any(|u| u.contains("logo.png")), "{l:?}");
+    }
+
+    #[test]
+    fn what_html_only_loads_is_not_a_link() {
+        // Campaign round 2's "Remote images" mail (B4): no `<a>` at all.
+        let html = r#"<html><head><style>body{background:url(https://t.x/bg.png)}</style></head>
+            <body background="https://t.x/body.jpg">
+            <img src="https://www.google.com/images/branding/logo.png">
+            <img src='http://neverssl.com/favicon.ico' srcset="https://i.x/a.png 1x, https://i.x/b,c.png 2x">
+            <img src="https://res.cloudinary.com/d/upload/w_600,h_300/logo.png">
+            <div style="background-image:url('https://t.x/div.gif')">Hi</div>
+            <p>Read https://example.com/terms or <a href="https://example.com/verify?t=1&amp;u=2">verify</a>.</p>
+            <a href="https://i.x/a.png">the picture itself</a>
+            <!--[if mso]><v:roundrect href="https://x.example/verify-mso"></v:roundrect><![endif]-->
+            <form action="https://x.example/confirm?t=1"><button>Confirm</button></form>
+            <p>if a < b then visit https://x.example/sloppy ok > done</p></body></html>"#;
+        let text = "Pictures: https://www.google.com/images/branding/logo.png\n\
+            https://res.cloudinary.com/d/upload/w_600,h_300/logo.png\nhttps://example.com/plain";
+        let l = links(text, html);
+        for gone in ["t.x", "google.com", "neverssl", "b,c.png", "cloudinary"] {
+            assert!(!l.iter().any(|u| u.contains(gone)), "{gone}: {l:?}");
+        }
+        // Links stay, wherever they are: an image that is also linked to,
+        // an Outlook button, a form, text in sloppy HTML.
+        for kept in [
+            "https://example.com/verify?t=1&u=2",
+            "https://i.x/a.png",
+            "https://x.example/verify-mso",
+            "https://x.example/confirm?t=1",
+            "https://x.example/sloppy",
+            "https://example.com/terms",
+            "https://example.com/plain",
+        ] {
+            assert!(l.iter().any(|u| u == kept), "{kept}: {l:?}");
+        }
+        assert_eq!(l[0], "https://example.com/verify?t=1&u=2");
     }
 }

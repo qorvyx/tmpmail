@@ -161,17 +161,10 @@ fn shown_domains(list: Vec<String>) -> Vec<String> {
     for d in list {
         let d = d.trim().to_ascii_lowercase();
         if is_domain(&d) {
-            push_new(&mut out, d);
+            tmpmail::extract::push_new(&mut out, d);
         }
     }
     out
-}
-
-/// Adds `s` unless the list has it already.
-pub fn push_new(list: &mut Vec<String>, s: String) {
-    if !list.contains(&s) {
-        list.push(s);
-    }
 }
 
 fn is_domain(d: &str) -> bool {

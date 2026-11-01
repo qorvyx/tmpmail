@@ -25,6 +25,9 @@ what breaks:
   only, not by the `Content-ID` the mail's HTML refers to, so the image showed as its alt
   text. The app now finds the part with that `Content-ID` in the raw message (mail.tm,
   mail.gw, DropMail and Maildrop have one) when the listing doesn't name it.
+- **Images aren't offered as links.** A mail's remote images were listed under Links, and a
+  mail with no link at all showed a Google logo as "the likeliest verification link". An address
+  the mail only loads isn't listed now, unless the mail also links to it.
 
 ## What's new in 0.1.3
 

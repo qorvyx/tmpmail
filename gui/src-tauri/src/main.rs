@@ -219,7 +219,7 @@ impl Mails {
             msg.html.as_deref().unwrap_or_default(),
         ) {
             if let Some(url) = commands::web_url(&l) {
-                commands::push_new(&mut links, url.to_string());
+                extract::push_new(&mut links, url.to_string());
             }
         }
         Mail {

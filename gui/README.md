@@ -30,7 +30,8 @@ preview on `gui-v*` tags; install steps are in the [main README](../README.md#de
   - The verification code, when `extract` finds one, in a banner at the top with a Copy
     button.
   - Links, the likeliest verification link first, each with Open (system browser, http and
-    https only) and Copy.
+    https only) and Copy. An address the mail only loads (its images, a CSS `url(...)`)
+    isn't listed, unless the mail also links to it.
   - From (copy the sender's address), to and date.
   - Load images (remote images, over **https only**), Original colors in dark mode, and
     Source (the raw message where the provider has it, else the HTML).

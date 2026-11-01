@@ -168,7 +168,11 @@ the other candidates with their scores.
 ### `links`: extract links
 
 Lists every link in a message. Verify, confirm, activate, magic-login and password-reset links
-come first. Unsubscribe, social media and image links come last.
+come first. Unsubscribe, social media and image links come last. An address the HTML only
+loads (an image's `src`, `srcset` or `background`, a CSS `url(...)`) isn't a link a reader
+would open, so it is left out, also when the text part repeats it, unless the mail links to
+it (`href`). The same list feeds `wait --link`, `L`/`O` in the TUI, the MCP
+server and the desktop app.
 
 | Option | Short | Explanation |
 |---|---|---|

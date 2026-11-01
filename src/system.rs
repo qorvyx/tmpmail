@@ -329,8 +329,10 @@ pub fn page(text: &str, pager: Option<&str>) -> anyhow::Result<()> {
 
 pub fn notify(title: &str, body: &str) {
     if on_path("notify-send") {
+        // The summary is plain text by the spec; only the body is markup.
+        let body = notify_body(body, server_reads_markup());
         let _ = Command::new("notify-send")
-            .args(["--app-name=tmpmail", "--", title, body])
+            .args(["--app-name=tmpmail", "--", title, &body])
             .status();
     } else if on_path("osascript") {
         let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
@@ -352,6 +354,91 @@ pub fn notify(title: &str, body: &str) {
                 .stderr(Stdio::null()),
         );
     }
+}
+
+/// The body as the notification server should get it: escaped when the
+/// server reads markup (most Linux ones), so a subject like `<b>x</b>` or a
+/// `Name <addr>` sender is shown as typed, never rendered.
+fn notify_body(body: &str, markup: bool) -> String {
+    if markup {
+        escape_markup(body)
+    } else {
+        body.to_string()
+    }
+}
+
+/// `&`, `<` and `>` as entities. Quotes stay: they need no escape in the
+/// body, and some servers would show `&apos;` as is (as the desktop app).
+fn escape_markup(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Whether the session's notification server reads the body as markup
+/// (its `body-markup` capability), asked through `gdbus`, else `dbus-send`.
+/// An answer is kept for the rest of the run. Without one, markup is
+/// assumed, as the desktop app does: the common servers (GNOME Shell, KDE
+/// Plasma) read it, and showing `&amp;` on a plain-text server is better
+/// than letting a sender's tags through.
+fn server_reads_markup() -> bool {
+    static MARKUP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    const QUERIES: &[(&str, &[&str])] = &[
+        (
+            "gdbus",
+            &[
+                "call",
+                "--session",
+                "--timeout",
+                "2",
+                "--dest",
+                "org.freedesktop.Notifications",
+                "--object-path",
+                "/org/freedesktop/Notifications",
+                "--method",
+                "org.freedesktop.Notifications.GetCapabilities",
+            ],
+        ),
+        (
+            "dbus-send",
+            &[
+                "--session",
+                "--print-reply",
+                "--reply-timeout=2000",
+                "--dest=org.freedesktop.Notifications",
+                "/org/freedesktop/Notifications",
+                "org.freedesktop.Notifications.GetCapabilities",
+            ],
+        ),
+    ];
+    if let Some(&known) = MARKUP.get() {
+        return known;
+    }
+    // Only the first tool found: when it gets no answer, the bus has none.
+    let answer = QUERIES
+        .iter()
+        .find(|(bin, _)| on_path(bin))
+        .and_then(|(bin, args)| {
+            Command::new(bin)
+                .args(*args)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+        })
+        .map(|o| lists_body_markup(&String::from_utf8_lossy(&o.stdout)));
+    match answer {
+        Some(markup) => *MARKUP.get_or_init(|| markup),
+        // Asked again next time: the server may not have started yet.
+        None => true,
+    }
+}
+
+/// Whether a `GetCapabilities` reply, as `gdbus` (`(['body', 'body-markup'],)`)
+/// or `dbus-send` (`string "body-markup"`) prints it, lists `body-markup`.
+fn lists_body_markup(reply: &str) -> bool {
+    reply.contains("'body-markup'") || reply.contains("\"body-markup\"")
 }
 
 /// A toast through Windows PowerShell's WinRT bridge, shown under
@@ -457,6 +544,23 @@ mod tests {
         let envs: Vec<_> = cmd.get_envs().collect();
         assert!(envs.contains(&("TMPMAIL_NOTIFY_TITLE".as_ref(), Some(title.as_ref()))));
         assert!(envs.contains(&("TMPMAIL_NOTIFY_BODY".as_ref(), Some(body.as_ref()))));
+    }
+
+    #[test]
+    fn notification_bodies_are_escaped_for_markup_servers() {
+        let body = "Hostile <b>x</b> & <a href=\"https://e.x\">y</a> 'q'";
+        assert_eq!(
+            notify_body(body, true),
+            "Hostile &lt;b&gt;x&lt;/b&gt; &amp; &lt;a href=\"https://e.x\"&gt;y&lt;/a&gt; 'q'"
+        );
+        assert_eq!(notify_body(body, false), body);
+        assert!(lists_body_markup("(['actions', 'body', 'body-markup'],)\n"));
+        assert!(lists_body_markup(
+            "   array [\n      string \"body-markup\"\n   ]"
+        ));
+        assert!(!lists_body_markup(
+            "(['actions', 'body', 'body-hyperlinks'],)"
+        ));
     }
 
     #[test]

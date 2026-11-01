@@ -175,7 +175,7 @@ there are shown dimmed at start. With `--json` it prints one JSON object per lin
 | Option | Short | Explanation |
 |---|---|---|
 | `--all-inboxes` | `-a` | Watch **every** saved inbox; each line starts with the address that received it. |
-| `--notify` | `-n` | Also show a desktop notification for each new message, through `notify-send` (Linux), `osascript` (macOS) or a PowerShell toast (Windows). Nothing is shown if none is available. |
+| `--notify` | `-n` | Also show a desktop notification for each new message, through `notify-send` (Linux), `osascript` (macOS) or a PowerShell toast (Windows). Nothing is shown if none is available. On Linux, `<`, `>` and `&` in the subject are escaped when the notification server reads markup (its `body-markup` capability, asked through `gdbus` or `dbus-send`; assumed when neither can tell), so a sender can't add bold text, links or images to it. |
 | `--interval SECONDS` | | Time between checks. Default 5. Push applies as in `wait`. |
 | `--rotate PERIOD` | | Switch to a fresh address this often, like `rotate` does: `90s`, `30m`, `2h`, `1h30m` (at least `1m`). The new address is printed (and notified with `-n`), becomes active, and is watched from then on. Can't be combined with `-a`. |
 | `--keep` | | With `--rotate`: keep the old inboxes instead of dropping them. |

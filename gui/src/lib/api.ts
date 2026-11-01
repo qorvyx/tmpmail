@@ -219,3 +219,17 @@ export function fileKind(contentType: string, filename: string): string {
   if (ext && ext.length <= 5) return ext;
   return ct || "File";
 }
+
+/**
+ * Scrolls `scroller` (only it, never the page) just enough to show `row`:
+ * the selected message follows j/k, the selected inbox [/], a field's error
+ * shows in a dialog's body. `scrollIntoView` would scroll every scrolling
+ * ancestor, the page too, which here has no scrollbar to undo it.
+ */
+export function reveal(scroller: Element | null | undefined, row: Element | null | undefined) {
+  if (!scroller || !row) return;
+  const s = scroller.getBoundingClientRect();
+  const r = row.getBoundingClientRect();
+  if (r.top < s.top) scroller.scrollTop -= s.top - r.top;
+  else if (r.bottom > s.bottom) scroller.scrollTop += Math.min(r.bottom - s.bottom, r.top - s.top);
+}

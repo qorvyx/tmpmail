@@ -12,11 +12,12 @@ preview on `gui-v*` tags; install steps are in the [main README](../README.md#de
 - **Inboxes:** create one (provider or "first that works", a username where the provider
   allows it, a domain from the provider's list, a label; a label another inbox has, or a
   username that is another inbox's label, is refused before anything is created, with the
-  reason under that field and the dialog left open), copy the address (click it, the
-  Copy button or `c`), make it the active inbox (the CLI's default, marked with a star),
-  check now, and delete it (asks first; deleted at the provider where it can be, then
-  forgotten here). Each inbox shows its provider, expiry or lifetime, `Live` when a push
-  stream is up (it stays on through a quick reconnect), and "Public" for Maildrop.
+  reason under that field, scrolled into view in a short window, and the dialog left open),
+  copy the address (click it, the Copy button or `c`), make it the active inbox (the CLI's
+  default, marked with a star), check now, and delete it (asks first; deleted at the
+  provider where it can be, then forgotten here). Each inbox shows its provider, expiry or
+  lifetime, `Live` when a push stream is up (it stays on through a quick reconnect), and
+  "Public" for Maildrop.
 - **Live mail:** the same worker loop as the TUI (`tmpmail::watcher`: polling, push
   streams, state reloads so CLI changes show up within ~5 s). New mail is marked New, and a
   notice names the sender and subject with an Open button. A notice about one message goes
@@ -136,8 +137,8 @@ wheel or the scrollbar.
 
 | Key | Action |
 |---|---|
-| `j` `↓` / `k` `↑` | Next / previous message (opens it) |
-| `[` / `]` | Previous / next inbox |
+| `j` `↓` / `k` `↑` | Next / previous message (opens it; the list scrolls to keep it in view) |
+| `[` / `]` | Previous / next inbox (the inbox list scrolls to it) |
 | `n` | New inbox at the first provider that works |
 | `N` | New inbox, choose the provider |
 | `y` | Copy the verification code |

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "./api";
+  import { api, reveal } from "./api";
   import Icon from "./Icon.svelte";
   import { app } from "./store.svelte";
 
@@ -57,6 +57,14 @@
     else if (labelError) labelInput?.focus();
   });
 
+  // The reason under a refused field scrolls into view with it: on a short
+  // window (1280×800 with a panel) the label's line sat below the visible
+  // part of the dialog's body. Run when the line appears.
+  const shown = (line: HTMLElement) => {
+    requestAnimationFrame(() => reveal(body, line));
+  };
+  let body = $state<HTMLElement>();
+
   // Editing the refused field clears its message.
   function edited(field: "user" | "label") {
     if (app.createError?.field === field) app.createError = null;
@@ -90,7 +98,7 @@
       </button>
     </header>
 
-    <div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
+    <div bind:this={body} class="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
       <fieldset>
         <legend class="mb-2 text-xs font-semibold">Provider</legend>
         <div class="divide-y divide-rule overflow-hidden rounded-lg border border-rule">
@@ -162,7 +170,7 @@
         </label>
       </div>
       {#if userError}
-        <p id="new-inbox-user-error" class="-mt-3 text-2xs text-danger" role="alert">{userError}</p>
+        <p {@attach shown} id="new-inbox-user-error" class="-mt-3 text-2xs text-danger" role="alert">{userError}</p>
       {/if}
       {#if user && !provider}
         <p class="-mt-3 text-2xs text-muted">Only providers that let you pick a username are tried.</p>
@@ -183,7 +191,7 @@
         />
       </label>
       {#if labelError}
-        <p id="new-inbox-label-error" class="-mt-3 text-2xs text-danger" role="alert">{labelError}</p>
+        <p {@attach shown} id="new-inbox-label-error" class="-mt-3 text-2xs text-danger" role="alert">{labelError}</p>
       {/if}
     </div>
 

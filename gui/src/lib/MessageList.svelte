@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { ago, until } from "./api";
+  import { ago, reveal, senderName, until } from "./api";
   import Icon from "./Icon.svelte";
   import { app } from "./store.svelte";
-  import { senderName } from "./api";
 
   let { search = $bindable() }: { search?: HTMLInputElement } = $props();
 
@@ -11,6 +10,13 @@
   const caps = $derived(inbox ? app.provider(inbox.provider)?.caps : undefined);
   const expired = $derived(inbox ? app.isExpired(inbox) : false);
   const left = $derived(inbox ? until(inbox.expires_at, app.now) : null);
+
+  // The open message stays in view when j/k (or anything else) opens
+  // another; filtering or new mail doesn't move the list.
+  let rows = $state<HTMLUListElement>();
+  $effect(() => {
+    if (app.openId) reveal(rows, rows?.querySelector('[aria-current="true"]'));
+  });
 </script>
 
 <section class="flex h-full min-h-0 flex-col bg-raised" aria-label="Messages">
@@ -106,7 +112,7 @@
       </div>
     {/if}
 
-    <ul class="min-h-0 flex-1 overflow-y-auto" aria-label="Messages in {inbox.address}">
+    <ul bind:this={rows} class="min-h-0 flex-1 overflow-y-auto" aria-label="Messages in {inbox.address}">
       {#each app.visible as s (s.id)}
         {@const open = s.id === app.openId}
         {@const fresh = app.isFresh(inbox.address, s.id)}

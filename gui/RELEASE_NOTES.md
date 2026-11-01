@@ -33,6 +33,12 @@ what breaks:
   didn't read the file again, so a key added by hand went unnoticed. Notices are now held
   until the window is ready, and every save reads the file again. Polling restarts only
   when the poll interval, push or the timeout changed.
+- **`j`/`k` keep the open message in view.** Past the last visible row the message opened
+  but the list stayed put; it now scrolls just enough to show it. `[`/`]` do the same in
+  the inbox list.
+- **A refused label's reason is in view.** In a 1280×800 window the new inbox dialog
+  scrolls, and the reason under the label field sat below its visible part; the dialog now
+  scrolls to it.
 
 ## What's new in 0.1.3
 

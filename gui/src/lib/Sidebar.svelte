@@ -1,11 +1,17 @@
 <script lang="ts">
   import logo from "../assets/logo.svg";
-  import { until } from "./api";
+  import { reveal, until } from "./api";
   import Icon from "./Icon.svelte";
   import { app } from "./store.svelte";
   import { theme, type ThemePref } from "./theme.svelte";
 
   const mod = /Mac/.test(navigator.platform) ? "⌘" : "Ctrl";
+
+  // The selected inbox stays in view when [/] (or anything else) picks it.
+  let list = $state<HTMLUListElement>();
+  $effect(() => {
+    if (app.selected) reveal(list, list?.querySelector('[aria-current="true"]'));
+  });
 
   const prefs: { value: ThemePref; icon: "monitor" | "sun" | "moon"; label: string }[] = [
     { value: "system", icon: "monitor", label: "System theme" },
@@ -27,7 +33,7 @@
     </button>
   </div>
 
-  <ul class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+  <ul bind:this={list} class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
     {#each app.inboxes as inbox (inbox.address)}
       {@const m = app.mail[inbox.address]}
       {@const expired = app.isExpired(inbox)}

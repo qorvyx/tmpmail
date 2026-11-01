@@ -117,7 +117,7 @@ arrives in time it exits with code 2. Built for scripts and CI.
 | `--body RE` | | Only messages whose body matches. |
 | `--timeout SECONDS` | `-t` | Give up after this long. Default 180 (or `timeout` in config / `TMPMAIL_TIMEOUT`). |
 | `--interval SECONDS` | | Time between inbox checks. Default 5, minimum 2. With push (see below) checks are rarer, since the provider announces new mail. |
-| `--include-existing` | | Also accept a message that was already in the inbox before you started waiting. |
+| `--include-existing` | | Also accept a message that was already in the inbox before you started waiting. Among the messages there when the wait starts, the **newest** match wins (in each inbox, with `-a`), so a code from an earlier try doesn't beat a resent one that has arrived; mail that arrives during the wait is taken oldest first. |
 | `--otp` | | Print only the verification code, and keep waiting until a message that contains one arrives. |
 | `--otp-regex RE` | | With `--otp`: your own pattern; the first `( )` group is the code. Example: `--otp-regex 'PIN: (\d+)'`. |
 | `--link` | | Print only the best link (verification links first). |
@@ -350,8 +350,8 @@ or, in a client's JSON config:
 Every tool takes `inbox` (address, local part or label; default: the active inbox). The waiting
 tools take `timeout` (default 120 s, at most 600 s, since clients give up on long calls) and
 `include_existing`, which is **true** by default here, unlike the CLI: the agent usually
-triggers the mail before it calls the tool, and must not miss it. Pass `false` to wait for new
-mail only.
+triggers the mail before it calls the tool, and must not miss it. As in the CLI, the newest
+matching message already there wins. Pass `false` to wait for new mail only.
 
 Mail comes from anyone who knows the address. The server tells the client to treat message
 contents as untrusted data, but an agent that acts on mail can still be steered by it.

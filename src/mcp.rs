@@ -473,7 +473,8 @@ fn tools() -> Vec<Value> {
         "include_existing": {
             "type": "boolean",
             "description": "Also accept mail already in the inbox (default true, so mail that \
-                            arrived before this call is not missed). False waits for new mail only."
+                            arrived before this call is not missed); among those, the newest match wins. \
+                            False waits for new mail only."
         },
     });
     let with = |extra: Value| {

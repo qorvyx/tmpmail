@@ -436,6 +436,14 @@ impl App {
         ));
 
         let mut failing: HashSet<usize> = HashSet::new();
+        // Inboxes whose mail from before the wait hasn't all been looked at
+        // yet (with `include_existing`): there the newest match wins, so a
+        // code from an earlier try doesn't beat the one just sent.
+        let mut existing: HashSet<usize> = if f.include_existing {
+            targets.iter().copied().collect()
+        } else {
+            HashSet::new()
+        };
         let mut poller = Poller::new(Duration::from_secs(interval), self.config.push());
         loop {
             self.check_cancel()?;
@@ -443,11 +451,16 @@ impl App {
                 if !poller.is_due(&self.state.inboxes[n].address) {
                     continue;
                 }
-                let Some(list) = self.poll(n, &mut targets, &mut failing, all, &mut poller)? else {
+                let Some(mut list) = self.poll(n, &mut targets, &mut failing, all, &mut poller)?
+                else {
                     continue;
                 };
-                // Oldest first, so the first matching arrival wins.
-                for s in list.iter().rev() {
+                // New arrivals oldest first, so the first matching one wins.
+                if !existing.contains(&n) {
+                    list.reverse();
+                }
+                let mut looked_at_all = true;
+                for s in &list {
                     let key = (n, s.id.clone());
                     if seen.contains(&key) {
                         continue;
@@ -460,7 +473,15 @@ impl App {
                     }
                     let msg = match self.with_inbox_at(n, |p, inbox| p.get(inbox, &key.1)) {
                         Ok(m) => m,
-                        Err(e) if e.is_provider_failure() => break,
+                        Err(e) if e.is_provider_failure() => {
+                            looked_at_all = false;
+                            break;
+                        }
+                        // Deleted or purged since it was listed.
+                        Err(Error::NotFound(_)) => {
+                            seen.insert(key);
+                            continue;
+                        }
                         Err(e) => return Err(e),
                     };
                     seen.insert(key);
@@ -474,6 +495,9 @@ impl App {
                         }
                         return Ok((n, msg, text, found));
                     }
+                }
+                if looked_at_all {
+                    existing.remove(&n);
                 }
             }
             if targets.is_empty() {
@@ -1139,6 +1163,101 @@ fn unique_path(path: &std::path::Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+
+    /// A provider whose inbox holds `mail` (id, subject, minute it came in).
+    struct Fixed {
+        mail: Vec<(&'static str, &'static str, u32)>,
+    }
+
+    impl Fixed {
+        fn message(&self, id: &str) -> Option<Message> {
+            let (id, subject, minute) = self.mail.iter().find(|m| m.0 == id)?;
+            Some(Message {
+                id: id.to_string(),
+                from: "Demo <hello@example.org>".into(),
+                subject: subject.to_string(),
+                date: Some(Utc.with_ymd_and_hms(2026, 10, 31, 12, *minute, 0).unwrap()),
+                text: Some(subject.to_string()),
+                ..Default::default()
+            })
+        }
+    }
+
+    impl Provider for Fixed {
+        fn id(&self) -> &'static str {
+            "fake"
+        }
+        fn name(&self) -> &'static str {
+            "Fake"
+        }
+        fn website(&self) -> &'static str {
+            ""
+        }
+        fn caps(&self) -> Capabilities {
+            Capabilities {
+                private: true,
+                custom_user: false,
+                choose_domain: false,
+                attachments: false,
+                raw: false,
+                delete_message: false,
+                delete_inbox: false,
+                login: false,
+                lifetime: "",
+            }
+        }
+        fn domains(&self) -> Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        fn create(&self, _: &CreateOpts) -> Result<Inbox> {
+            unimplemented!()
+        }
+        fn list(&self, _: &mut Inbox) -> Result<Vec<Summary>> {
+            Ok(self
+                .mail
+                .iter()
+                .filter_map(|m| self.message(m.0))
+                .map(|m| m.summary())
+                .collect())
+        }
+        fn get(&self, _: &mut Inbox, id: &str) -> Result<Message> {
+            self.message(id).ok_or_else(|| Error::NotFound(id.into()))
+        }
+    }
+
+    fn app_with(dir: &std::path::Path, p: Fixed) -> App {
+        let mut app = App::for_test(dir.to_path_buf());
+        app.set_provider(Box::new(p));
+        let inbox = Inbox::new("fake", "a@x.com".into(), Value::Null);
+        app.state = app.store.update(|s| s.add(inbox)).unwrap().0;
+        app
+    }
+
+    #[test]
+    fn the_newest_existing_match_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        // Listed in the provider's order, which isn't by date.
+        let mut app = app_with(
+            dir.path(),
+            Fixed {
+                mail: vec![
+                    ("old", "Your code is 111222", 10),
+                    ("other", "Newsletter", 30),
+                    ("new", "Your code is 333444", 20),
+                ],
+            },
+        );
+        let filter = WaitFilter {
+            include_existing: true,
+            timeout: Some(5),
+            ..Default::default()
+        };
+        let (_, msg, _, code) = app
+            .wait_for(&filter, |m, body| extract::otp(&m.subject, body, None))
+            .unwrap();
+        assert_eq!((msg.id.as_str(), code.as_str()), ("new", "333444"));
+    }
 
     #[test]
     fn unique_paths_do_not_overwrite() {

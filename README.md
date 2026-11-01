@@ -75,7 +75,9 @@ tmpmail --json ls | jq -r '.messages[0].subject'
 ```
 
 `--include-existing` matters when the mail can arrive before `wait` starts. Without it,
-`wait` only accepts mail that is new since the call. In GitHub Actions:
+`wait` only accepts mail that is new since the call. With it, the newest matching mail
+already there when `wait` starts wins, so a code from an earlier try doesn't beat a resent
+one that has arrived. In GitHub Actions:
 
 ```yaml
 - name: Install tmpmail

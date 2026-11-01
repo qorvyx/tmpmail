@@ -212,7 +212,7 @@ pub struct WaitFilter {
     #[arg(long)]
     pub interval: Option<u64>,
 
-    /// Also consider messages that were already there
+    /// Also consider messages that were already there (the newest match wins)
     #[arg(long)]
     pub include_existing: bool,
 }

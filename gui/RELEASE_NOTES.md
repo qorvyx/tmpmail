@@ -46,6 +46,9 @@ what breaks:
 - **The tray's "Copy code" works right after a start.** It offered only codes that arrived
   while the app ran, so after a restart it was greyed out although a code had come minutes
   before. It now also offers the newest code of the last 15 minutes already in an inbox.
+- **Documented:** what stays on disk after uninstalling, on each system, and how to remove
+  it; and the `/tmp/appimage_extracted_*` folder `--appimage-extract-and-run` leaves
+  behind (the AppImage runtime's doing).
 - **A narrow message pane stays readable.** With the window tiled to half the screen, the
   sender's name ran over the date and the links were cut to a letter or two. The message
   list now gives way (down to 280 px) so the open message keeps 340 px where it can, the

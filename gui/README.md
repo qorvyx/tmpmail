@@ -221,6 +221,50 @@ rm -r squashfs-root
 
 (If your home folder's path has spaces, put the `Exec=` path in double quotes.)
 
+### Without FUSE: `--appimage-extract-and-run`
+
+Started with `--appimage-extract-and-run` (or with `APPIMAGE_EXTRACT_AND_RUN=1` in the
+environment, which does the same), the AppImage isn't mounted: its runtime unpacks it into
+`appimage_extracted_<hash>` in the temporary folder (`$TMPDIR`, else `/tmp`) and runs it
+from there. That is the AppImage runtime's doing, not the app's, and on Arch and Fedora
+(round 2) the folder was still there after the app quit normally; the runtime reuses it on
+the next start of the same AppImage. It is about the AppImage's size and holds nothing of
+yours. Delete it once tmpmail has quit, and only tmpmail's (other AppImages started this
+way have folders named the same way): `ls -d /tmp/appimage_extracted_*/usr/bin/tmpmail-gui`
+shows which one it is, then `rm -rf` that `appimage_extracted_<hash>` folder. Where `/tmp` is cleared at boot (Fedora, Arch and Ubuntu), a reboot removes it
+too.
+
+## Removing it
+
+Uninstalling (`sudo apt remove tmpmail`, `sudo dnf remove tmpmail`, deleting the AppImage,
+moving tmpmail.app to the Bin, or Windows' uninstaller) removes the program. A package also
+removes its menu entry and icons; an AppImage you integrated leaves them (see below). Your
+inboxes are kept on purpose: the CLI uses the same ones, and an address you still need
+stays reachable. On Windows the uninstaller may offer to delete the application data: that
+is the window's own storage (the third row), not the config or inboxes. To remove
+everything, delete these too, once the app and the CLI are no longer running:
+
+| What | Linux | macOS | Windows |
+|---|---|---|---|
+| Config (`config.toml`, the app's `gui.json`), shared with the CLI | `~/.config/tmpmail` | `~/Library/Application Support/tmpmail` | `%APPDATA%\tmpmail` |
+| Inboxes and their credentials (`state.json`), and `read --html` copies (`view/`), shared with the CLI | `~/.local/state/tmpmail` | `~/Library/Application Support/tmpmail` | `%LOCALAPPDATA%\tmpmail` |
+| The window's own storage (theme, pane widths) | `~/.local/share/io.github.qorvyx.tmpmail` | in `~/Library`: `Application Support/`, `Caches/`, `HTTPStorages/` and `WebKit/io.github.qorvyx.tmpmail`, `Preferences/io.github.qorvyx.tmpmail.plist`, `Saved Application State/io.github.qorvyx.tmpmail.savedState` | `%LOCALAPPDATA%\io.github.qorvyx.tmpmail` |
+| The AppImage's notification logo | `~/.cache/tmpmail` | – | – |
+| `read --html` copies for a snap browser | `~/snap/*/common/tmpmail-view` | – | – |
+| An AppImage integrated by hand (as above) | `~/.local/share/applications/tmpmail.desktop`, `~/.local/share/icons/hicolor/*/apps/tmpmail-gui.png`; AppImageLauncher and Gear Lever remove theirs with the AppImage | – | – |
+| Notification settings | KDE: the `[Applications][tmpmail]` group in `~/.config/plasmanotifyrc`; GNOME: `dconf reset -f /org/gnome/desktop/notifications/application/tmpmail/` | System Settings → Notifications keeps an entry | Settings → System → Notifications keeps an entry |
+
+On Linux `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` move the
+rows under `~/.config`, `~/.local/state`, `~/.local/share` and `~/.cache`, and
+`TMPMAIL_CONFIG` and `TMPMAIL_STATE_DIR` move the config and the inboxes on every system.
+The drag-out folder (`tmpmail-drag-*` in the temporary folder) goes when the app quits
+normally; after a crash or a killed app it stays until `/tmp` is cleared. No link handler
+is registered on Linux or macOS; on Windows the uninstaller removes the `tmpmail-desktop:`
+one it registered. The Linux rows for the config, inboxes, window storage and KDE's
+settings were seen by hand on Ubuntu 26.04 (deb), Kubuntu 26.10 (deb), Arch and Fedora 44
+(AppImage) in round 2; the other rows follow from where the code and the libraries put
+these files and weren't checked by hand.
+
 ## Dark mail
 
 The theme reaches the mail frame only through its URL (`?theme=dark`), never through a

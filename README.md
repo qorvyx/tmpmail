@@ -47,7 +47,7 @@ runtime linked in, so no Visual C++ Redistributable needed since 0.3.1). Each re
 from this repository by the release workflow:
 
 ```sh
-gh attestation verify tmpmail-0.3.3-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail
+gh attestation verify tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail
 ```
 
 Nothing else is needed at runtime. Optional extras: `wl-copy`, `xclip`, `xsel` or `pbcopy`
@@ -83,8 +83,8 @@ one that has arrived. In GitHub Actions:
 - name: Install tmpmail
   run: |
     mkdir -p ~/.local/bin
-    curl -sSfL https://github.com/qorvyx/tmpmail/releases/download/v0.3.3/tmpmail-0.3.3-x86_64-unknown-linux-musl.tar.gz \
-      | tar xz --strip-components=1 -C ~/.local/bin tmpmail-0.3.3-x86_64-unknown-linux-musl/tmpmail
+    curl -sSfL https://github.com/qorvyx/tmpmail/releases/download/v0.3.4/tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz \
+      | tar xz --strip-components=1 -C ~/.local/bin tmpmail-0.3.4-x86_64-unknown-linux-musl/tmpmail
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 - name: Sign-up test

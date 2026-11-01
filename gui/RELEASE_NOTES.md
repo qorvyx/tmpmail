@@ -1,11 +1,16 @@
-tmpmail desktop 0.1.2 fixes what a hands-on test of 0.1.1 on Kubuntu (KDE Plasma) found.
-It is built on the same core as the `tmpmail` command-line tool (0.3.2) and shares its
-inboxes and `config.toml`.
+tmpmail desktop 0.1.3 brings the library fixes of the `tmpmail` command-line tool 0.3.3 and
+0.3.4 that show in the app: decoded sender names and subjects, labels that always pick one
+inbox, and a clearer error when a domain isn't offered. (Their TUI and MCP fixes don't apply
+to the app.) It is built on the same core as the `tmpmail` command-line tool (0.3.4) and
+shares its inboxes and `config.toml`.
 
-**This is a preview.** On Linux, 0.1.2's rpm was tested by hand on Fedora with KDE Plasma
-(X11 and Wayland) and GNOME (Wayland); the deb and the AppImage come from the same build but
-weren't tried by hand. On Windows only 0.1.0 was tried by hand, on a clean Windows 11, and
-macOS has only been checked by the automated security probe. Please report what breaks:
+**This is a preview.** The shared core's fixes were tested by hand in the CLI; the app's own
+change (the reason shown under the label or username field) was checked only by the
+automated probe and unit tests so far. On Linux, 0.1.2's rpm was tested by hand on Fedora
+with KDE Plasma (X11 and Wayland) and GNOME (Wayland); the deb and the AppImage come from the
+same build but weren't tried by hand. On Windows only 0.1.0 was tried by hand, on a clean
+Windows 11, and macOS has only been checked by the automated security probe. Please report
+what breaks:
 <https://github.com/qorvyx/tmpmail/issues>.
 
 ## What's new in 0.1.3
@@ -19,7 +24,6 @@ macOS has only been checked by the automated security probe. Please report what 
   the label or username field; the dialog stays open so you can change it.
 - **A clearer error when a domain isn't offered** while one provider is down: the
   unreachable provider is named first, then what the others answered.
-- The TUI crash in short terminals fixed in CLI 0.3.3 doesn't affect the app.
 
 ## What's new in 0.1.2
 
@@ -88,16 +92,16 @@ macOS has only been checked by the automated security probe. Please report what 
 
 | System | File |
 |---|---|
-| Windows 10/11 (x64) | `tmpmail-desktop-0.1.2-x64-setup.exe` |
-| macOS 10.15+ (Apple silicon and Intel) | `tmpmail-desktop-0.1.2-universal.dmg` |
-| Debian, Ubuntu (x86_64) | `tmpmail-desktop-0.1.2-amd64.deb` |
-| Fedora and other RPM-based (x86_64) | `tmpmail-desktop-0.1.2-x86_64.rpm` |
-| Other Linux (x86_64) | `tmpmail-desktop-0.1.2-x86_64.AppImage` |
+| Windows 10/11 (x64) | `tmpmail-desktop-0.1.3-x64-setup.exe` |
+| macOS 10.15+ (Apple silicon and Intel) | `tmpmail-desktop-0.1.3-universal.dmg` |
+| Debian, Ubuntu (x86_64) | `tmpmail-desktop-0.1.3-amd64.deb` |
+| Fedora and other RPM-based (x86_64) | `tmpmail-desktop-0.1.3-x86_64.rpm` |
+| Other Linux (x86_64) | `tmpmail-desktop-0.1.3-x86_64.AppImage` |
 
 Check a download against `SHA256SUMS`, or its build attestation:
 
 ```sh
-gh attestation verify tmpmail-desktop-0.1.2-x86_64.AppImage --repo qorvyx/tmpmail
+gh attestation verify tmpmail-desktop-0.1.3-x86_64.AppImage --repo qorvyx/tmpmail
 ```
 
 ## Installing an unsigned app
@@ -114,8 +118,8 @@ The app isn't signed with a paid certificate, so each system warns once.
   fetches WebView2 if it's missing. If **Smart App Control** is on, it blocks the installer
   outright with no way past; it can only be turned off as a whole (Windows Security → App &
   browser control).
-- **Linux:** `sudo apt install ./tmpmail-desktop-0.1.2-amd64.deb`, or `sudo dnf install
-  ./tmpmail-desktop-0.1.2-x86_64.rpm`; both pull in WebKitGTK 4.1. The AppImage runs
+- **Linux:** `sudo apt install ./tmpmail-desktop-0.1.3-amd64.deb`, or `sudo dnf install
+  ./tmpmail-desktop-0.1.3-x86_64.rpm`; both pull in WebKitGTK 4.1. The AppImage runs
   as is after `chmod +x` (it may need `libfuse2`; without FUSE, run it with
   `--appimage-extract-and-run`). On NVIDIA, if the window stays blank, start it with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1`.

@@ -1,6 +1,6 @@
 [package]
 name = "tmpmail"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 description = "Temporary email from the terminal: multiple providers, automatic fallback, wait/OTP/JSON for automation"
 license = "GPL-3.0-or-later"

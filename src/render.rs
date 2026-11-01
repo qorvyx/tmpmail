@@ -247,6 +247,17 @@ fn sanitize(
         .add_tag_attributes("td", ["valign", "colspan", "rowspan"])
         .add_tag_attributes("table", ["cellpadding", "cellspacing", "border"])
         .link_rel(Some("noopener noreferrer nofollow"))
+        // Mail has no base address, so a relative link or image means
+        // nothing, and `//host` or `\\host\share` would resolve against the
+        // page: `file://host` (an SMB connection on Windows) for the CLI's
+        // copy, the app's own scheme in its frame.
+        // In the CLI's copy, in-page links (`#section`) stay; the app's
+        // frame opens every link as a popup, so there they go too.
+        .url_relative(if frame.is_some() {
+            ammonia::UrlRelative::Deny
+        } else {
+            ammonia::UrlRelative::Custom(Box::new(InPageOnly))
+        })
         .url_schemes(HashSet::from(["http", "https", "mailto", "cid", "data"]));
     if frame.is_some() {
         // Image-map areas are links too; without a target they would
@@ -257,6 +268,19 @@ fn sanitize(
     }
     let cid_base = frame.map(|f| f.cid_base.to_string());
     builder.attribute_filter(move |element, attribute, value| {
+        // A quote's source: no reader follows it, and ammonia doesn't check
+        // it as a URL.
+        if attribute == "cite" {
+            return None;
+        }
+        // `data:` only as an image's own raster picture, never as a link (a
+        // page or script of the sender's) or an SVG.
+        if is_url_attribute(attribute)
+            && is_data_url(value)
+            && !(element == "img" && attribute == "src" && is_raster_data(value))
+        {
+            return None;
+        }
         if element == "img" && attribute == "src" {
             if let (Some(base), Some(id)) = (&cid_base, value.strip_prefix("cid:")) {
                 return Some(Cow::Owned(format!("{base}{}", percent_encode(id))));
@@ -276,7 +300,7 @@ fn sanitize(
                     Cow::Borrowed(value)
                 });
             }
-            let remote = !(value.starts_with("data:") || value.starts_with("cid:"));
+            let remote = !(is_data_url(value) || value.starts_with("cid:"));
             if remote && !allow_remote_images {
                 return None;
             }
@@ -285,16 +309,29 @@ fn sanitize(
                 return None;
             }
         }
-        // Inline styles can fetch remote resources through url(...). The
-        // app's frame keeps the rest of the style (colors, spacing); the
-        // CLI's file drops the whole attribute, as it always has.
-        if attribute == "style" && !allow_remote_images {
-            if cid_base.is_some() {
-                return style_without_resources(value).map(Cow::Owned);
+        if attribute == "style" {
+            // Nothing may leave its box: a link laid over the whole mail
+            // would open the sender's address on any click.
+            let value = style_in_its_box(value);
+            // Inline styles can fetch remote resources through url(...).
+            // The app's frame keeps the rest of the style (colors,
+            // spacing); the CLI's file drops the whole attribute, as it
+            // always has.
+            if !allow_remote_images {
+                if cid_base.is_some() {
+                    return style_without_resources(&value).map(Cow::Owned);
+                }
+                if loads_anything(&value) {
+                    return None;
+                }
+            } else {
+                // With images on, they load from the web only: a relative
+                // `url(...)` would reach the app's own scheme in its frame
+                // (which loads over https only), or a file next to the
+                // CLI's copy.
+                return style_web_only(&value, cid_base.is_none()).map(Cow::Owned);
             }
-            if value.to_ascii_lowercase().contains("url(") {
-                return None;
-            }
+            return (!value.is_empty()).then_some(value);
         }
         Some(Cow::Borrowed(value))
     });
@@ -308,39 +345,310 @@ fn style_without_resources(style: &str) -> Option<String> {
     let kept: Vec<&str> = declarations(style)
         .into_iter()
         .map(str::trim)
+        .filter(|d| !d.is_empty() && !d.contains('\\') && !loads_anything(d))
+        .collect();
+    (!kept.is_empty()).then(|| kept.join(";"))
+}
+
+/// The inline-style properties kept: the ones mail uses for its look
+/// (colors, fonts, spacing, borders, sizes, table and flex layout), and
+/// none that lets an element leave its place and cover the rest of the mail
+/// (`position`, `inset`, `z-index`, `transform`, `scale`, `zoom`, ...).
+/// Each name also stands for its longhands (`border` for `border-top`).
+const STYLE_KEPT: &[&str] = &[
+    "color",
+    "background",
+    "border",
+    "padding",
+    "margin",
+    "font",
+    "text-",
+    "line-height",
+    "letter-spacing",
+    "word-",
+    "white-space",
+    "vertical-align",
+    "width",
+    "height",
+    "max-width",
+    "max-height",
+    "min-width",
+    "min-height",
+    "display",
+    "table-layout",
+    "caption-side",
+    "empty-cells",
+    "list-style",
+    "outline",
+    "overflow",
+    "visibility",
+    "float",
+    "clear",
+    "box-sizing",
+    "box-shadow",
+    "cursor",
+    "hyphens",
+    "direction",
+    "flex",
+    "gap",
+    "row-gap",
+    "column-gap",
+    "align-",
+    "justify-",
+    "order",
+    "mso-",
+    "-webkit-text-size-adjust",
+    "-ms-text-size-adjust",
+    "quotes",
+    "tab-size",
+];
+
+/// Whether an inline-style property is one [`STYLE_KEPT`] keeps.
+fn style_property_kept(name: &str) -> bool {
+    let name = name.trim().to_ascii_lowercase();
+    STYLE_KEPT.iter().any(|k| {
+        name == *k
+            || (k.ends_with('-') && name.starts_with(k))
+            || name.strip_prefix(k).is_some_and(|r| r.starts_with('-'))
+    })
+}
+
+/// `style` with only the declarations of [`STYLE_KEPT`] properties, so
+/// nothing may leave its box: a link laid over the whole mail would open
+/// the sender's address on any click. Read as CSS reads it: comments go,
+/// and so does a declaration with a CSS escape (which could spell any
+/// name) or a negative margin. Unchanged when every declaration is kept.
+fn style_in_its_box(style: &str) -> Cow<'_, str> {
+    let (text, commented) = match style.find("/*") {
+        Some(_) => (Cow::Owned(without_css_comments(style)), true),
+        None => (Cow::Borrowed(style), false),
+    };
+    let all = declarations(&text);
+    let kept = |d: &str| {
+        let d = d.trim();
+        d.is_empty()
+            || (!d.contains('\\')
+                && d.split_once(':').is_some_and(|(name, value)| {
+                    style_property_kept(name) && !pulls_out(name, value)
+                }))
+    };
+    if !commented && all.iter().all(|d| kept(d)) {
+        return Cow::Borrowed(style);
+    }
+    let out: Vec<&str> = all
+        .into_iter()
+        .map(str::trim)
+        .filter(|d| !d.is_empty() && kept(d))
+        .collect();
+    Cow::Owned(out.join(";"))
+}
+
+/// Whether a kept property's value would still pull the element over
+/// others: a negative margin (with padding it can cover the whole mail).
+fn pulls_out(name: &str, value: &str) -> bool {
+    let name = name.trim().to_ascii_lowercase();
+    (name.starts_with("margin") || name == "text-indent")
+        && value
+            .split(|c: char| c.is_whitespace() || c == '(' || c == ',')
+            .any(|v| v.starts_with('-'))
+}
+
+/// CSS text without its `/* ... */` comments (an unclosed one runs to the
+/// end, as in CSS).
+fn without_css_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("/*") {
+        out.push_str(&rest[..i]);
+        out.push(' ');
+        rest = match rest[i + 2..].find("*/") {
+            Some(j) => &rest[i + 2 + j + 2..],
+            None => "",
+        };
+    }
+    out.push_str(rest);
+    out
+}
+
+/// What can load an image or style sheet from inline CSS.
+const CSS_LOADERS: [&str; 8] = [
+    "url(",
+    "image(",
+    "image-set(",
+    "cross-fade(",
+    "element(",
+    "src(",
+    "@import",
+    "expression(",
+];
+
+/// Whether a style could load anything, read as CSS reads it (escapes
+/// decoded, any case): `url(`, an image function, `@import`, or the old
+/// `expression(`.
+fn loads_anything(style: &str) -> bool {
+    let css = css_unescape(style).to_ascii_lowercase();
+    CSS_LOADERS.iter().any(|f| css.contains(f))
+}
+
+/// The declarations of `style` that load nothing, or only `https:` URLs
+/// (and `http:` ones with `http`) through `url(...)`, written plainly (a
+/// CSS escape drops it). `None` when nothing is left.
+fn style_web_only(style: &str, http: bool) -> Option<String> {
+    let kept: Vec<&str> = declarations(style)
+        .into_iter()
+        .map(str::trim)
         .filter(|d| {
+            if d.is_empty() {
+                return false;
+            }
             let lower = d.to_ascii_lowercase();
-            !d.is_empty()
-                && !lower.contains('\\')
-                && ![
-                    "url(",
-                    "image(",
-                    "image-set(",
-                    "src(",
-                    "cross-fade(",
-                    "element(",
-                ]
-                .iter()
-                .any(|f| lower.contains(f))
+            if !loads_anything(d) {
+                return true;
+            }
+            if lower.contains('\\') || CSS_LOADERS[1..].iter().any(|f| lower.contains(f)) {
+                return false;
+            }
+            lower.split("url(").skip(1).all(|arg| {
+                let arg =
+                    arg.trim_start_matches(|c: char| c.is_whitespace() || c == '"' || c == '\'');
+                arg.starts_with("https://")
+                    || (http && arg.starts_with("http://"))
+                    || (arg.starts_with("data:image/") && !arg.starts_with("data:image/svg"))
+            })
         })
         .collect();
     (!kept.is_empty()).then(|| kept.join(";"))
 }
 
+/// CSS text with its escapes decoded: `\` and up to six hex digits (and a
+/// space after them), or `\` and any other character, as CSS reads them.
+fn css_unescape(s: &str) -> Cow<'_, str> {
+    if !s.contains('\\') {
+        return Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let mut hex = String::new();
+        while hex.len() < 6 && chars.peek().is_some_and(char::is_ascii_hexdigit) {
+            hex.push(chars.next().expect("peeked"));
+        }
+        if hex.is_empty() {
+            if let Some(next) = chars.next() {
+                out.push(next);
+            }
+            continue;
+        }
+        if chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+        let code = u32::from_str_radix(&hex, 16).unwrap_or(0xFFFD);
+        out.push(
+            char::from_u32(code)
+                .filter(|&c| c != '\0')
+                .unwrap_or('\u{FFFD}'),
+        );
+    }
+    Cow::Owned(out)
+}
+
+/// Keeps a relative URL only if it is an in-page link (`#section`).
+struct InPageOnly;
+
+impl<'a> ammonia::UrlRelativeEvaluate<'a> for InPageOnly {
+    fn evaluate<'url>(&self, url: &'url str) -> Option<Cow<'url, str>> {
+        url.starts_with('#').then_some(Cow::Borrowed(url))
+    }
+}
+
+/// Whether an attribute holds a URL (where a `data:` one could be a page).
+fn is_url_attribute(attribute: &str) -> bool {
+    matches!(
+        attribute,
+        "href"
+            | "src"
+            | "cite"
+            | "longdesc"
+            | "background"
+            | "poster"
+            | "action"
+            | "formaction"
+            | "srcset"
+            | "usemap"
+            | "data"
+    )
+}
+
+/// A URL as a browser reads its scheme: leading spaces and controls
+/// ignored, tabs and line breaks dropped anywhere. Only the start is read.
+fn url_start(url: &str) -> String {
+    url.trim_start_matches(|c: char| c <= ' ')
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .take(64)
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+/// Whether a URL is a `data:` one, in any spelling a browser accepts.
+fn is_data_url(url: &str) -> bool {
+    url_start(url).starts_with("data:")
+}
+
+/// Whether a `data:` URL holds a raster image ([`crate::provider::image_type`]:
+/// never SVG).
+fn is_raster_data(url: &str) -> bool {
+    let start = url_start(url);
+    let Some(rest) = start.strip_prefix("data:") else {
+        return false;
+    };
+    let mime = rest.split([';', ',']).next().unwrap_or_default();
+    crate::provider::image_type(mime, "").is_some()
+}
+
 /// Splits CSS declarations at the semicolons outside quotes and brackets,
-/// so `url(data:image/png;base64,...)` stays one declaration.
+/// so `url(data:image/png;base64,...)` stays one declaration. Read as CSS
+/// tokenizes it: a backslash escapes the next character, an unclosed string
+/// ends at the line's end, and an unquoted `url(...)` runs to its `)`
+/// whatever quotes it holds.
 fn declarations(style: &str) -> Vec<&str> {
-    let (mut out, mut start, mut depth, mut quote) = (Vec::new(), 0, 0usize, None);
+    let (mut out, mut start, mut depth) = (Vec::new(), 0, 0usize);
+    let (mut quote, mut in_url) = (None, false);
     let mut chars = style.char_indices();
     while let Some((i, c)) = chars.next() {
+        if in_url {
+            match c {
+                '\\' => {
+                    chars.next();
+                }
+                ')' => {
+                    in_url = false;
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+            continue;
+        }
         match (quote, c) {
-            (Some(_), '\\') => {
+            (_, '\\') => {
                 chars.next();
             }
             (Some(q), _) if c == q => quote = None,
+            (Some(_), '\n' | '\r' | '\u{C}') => quote = None,
             (Some(_), _) => {}
             (None, '"' | '\'') => quote = Some(c),
-            (None, '(') => depth += 1,
+            (None, '(') => {
+                depth += 1;
+                let unquoted = !style[i + 1..].trim_start().starts_with(['"', '\'']);
+                let is_url = style
+                    .get(i.saturating_sub(3)..i)
+                    .is_some_and(|w| w.eq_ignore_ascii_case("url"));
+                in_url = is_url && unquoted;
+            }
             (None, ')') => depth = depth.saturating_sub(1),
             (None, ';') if depth == 0 => {
                 out.push(&style[start..i]);
@@ -370,13 +678,7 @@ pub fn has_own_colors(sanitized: &str) -> bool {
 /// spaces and control characters are ignored, and tabs and newlines
 /// anywhere.
 fn is_http(url: &str) -> bool {
-    let scheme: String = url
-        .trim_start_matches(|c: char| c <= ' ')
-        .chars()
-        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
-        .take(5)
-        .collect();
-    scheme.eq_ignore_ascii_case("http:")
+    url_start(url).starts_with("http:")
 }
 
 /// Percent-encodes everything but unreserved URL characters.
@@ -703,5 +1005,180 @@ mod tests {
         let cut = safe_filename(&long, "f");
         assert!(cut.len() <= MAX_FILENAME && cut.ends_with(".pdf"), "{cut}");
         assert!(cut.starts_with('\u{e9}'));
+    }
+
+    /// Security review A's sanitizer payloads ("Checked, fine" and A6, A8,
+    /// C2, C3), and more of the same kind.
+    const PAYLOADS: &str = r#"<a href="data:text/html,<script>alert(1)</script>">x</a>
+<a href="javascript&colon;alert(1)">x</a>
+<a href=" javascript:alert(1)">x</a>
+<a href="jav&#x09;ascript:alert(1)">x</a>
+<img src="//evil.example/p.gif">
+<img src="\\evil.example\share\p.gif">
+<a href="//evil.example/x">rel</a>
+<a href="\\evil.example\share">unc</a>
+<img src="DATA:image/png;base64,AA">
+<img src=" data:image/svg+xml,<svg onload=alert(1)>">
+<img src="cid:x&quot; onerror=&quot;alert(1)">
+<img src="cid:../../etc/passwd">
+<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>
+<svg><animate attributeName="href" values="javascript:alert(1)"/></svg>
+<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>
+<noscript><p title="</noscript><img src=x onerror=alert(1)>">
+<form action="https://e.x"><button formaction="https://e.x">b</button></form>
+<meta http-equiv="refresh" content="0;url=https://e.x">
+<base href="https://evil.example/">
+<link rel="stylesheet" href="https://e.x/s.css">
+<p style="background-image: u\72l(https://t.example/a)">esc</p>
+<p style="background: URL(https://t.example/a)">upper</p>
+<p style="list-style: url( 'https://t.example/a')">ls</p>
+<p style="behavior:url(x.htc)">b</p>
+<p style="background:image-set('https://t.example/z' 1x)">is</p>
+<p style="cursor: url(https://t.example/c), auto">cur</p>
+<table background="https://t.example/bg.png"><tr><td background="https://t.example/td.png">bg</td></tr></table>
+<body background="https://t.example/body.png">
+<input type="image" src="https://t.example/i.png">
+<video poster="https://t.example/v.png"></video>
+<object data="https://e.x/o"></object>
+<iframe src="https://e.x"></iframe>
+<area href="javascript:alert(1)">
+<img srcset="https://t.example/s.png 1x">
+<a href="https://e.x" ping="https://t.example/ping">p</a>
+<img src="https://t.example/a.png" style="x">
+<p style="color:red;background:u&#x72;l(https://t.example/ent)">ent</p>
+<p style="background:url&#40;https://t.example/ent2)">ent2</p>
+<p style="--x:url(https://t.example/var); background:var(--x)">var</p>
+<p style="background:ur/**/l(https://t.example/cm)">cm</p>
+<img src="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=">
+<a href="mailto:a@b?body=x">m</a>
+<a href="cid:foo">c</a>
+<img src="http://b.example/w.png">
+<p style="background:url(data:image/png;base64,AA)">d</p>
+<a href="https://e.x" target="_top">t</a>
+<a href="https://e.x" target="_self" rel="opener">t</a>
+<a href="https://tracker.example/u1" style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:9">over</a>
+<a href="https://tracker.example/u2" style="POSITION : absolute; inset:0; color:red">over2</a>
+<a href="https://tracker.example/u3" style="p\6fsition:fixed;inset-block:0;transform:scale(50)">over3</a>
+<img src="/mail/1?theme=dark"><img src="/mail/1/source">
+<p style="background:url(/mail/1)">rel-css</p>
+<p style="background:url('//evil.example/x')">proto-css</p>
+<p style="background:IMAGE-SET('https://t.example/z' 1x)">is2</p>
+<p style="background:u\72l(https://t.example/esc2)">esc2</p>
+<p style="x:expression(alert(1))">expr</p>
+<p style="@import 'https://t.example/i.css'">imp</p>
+<a href="data:image/png;base64,AA">datalink</a>
+<img src="data:text/html;base64,PHNjcmlwdD4=">
+<a href="https://tracker.example/c1" style="/**/position:fixed;/**/inset:0;/**/z-index:9">c1</a>
+<a href="https://tracker.example/c2" style="position/**/:fixed">c2</a>
+<a href="https://tracker.example/c3" style="x:\';position:fixed;inset:0;z-index:9">c3</a>
+<a href="https://tracker.example/c4" style="x:'a&#10;;position:fixed;inset:0">c4</a>
+<a href="https://tracker.example/c5" style="display:inline-block;scale:200">c5</a>
+<a href="https://tracker.example/c6" style="-webkit-transform:scale(200);zoom:200">c6</a>
+<a href="https://tracker.example/c7" style="offset-path:path('M0 0');rotate:45deg">c7</a>
+<a href="d&#9;ata:text/html,<script>alert(1)</script>">dt</a>
+<img src="d&#10;ata:image/svg+xml,<svg onload=alert(1)>">
+<a href="https://tracker.example/c8" style="background:url(https://i.example/a'b);position:fixed;inset:0;z-index:9">c8</a>
+<a href="https://tracker.example/c9" style="display:block;opacity:.99;margin:-3000px;padding:3000px;background:#fff">c9</a>
+<blockquote cite="//evil.example/x">q</blockquote>"#;
+
+    #[test]
+    fn hostile_payloads_are_neutralized_in_every_mode() {
+        let frame = Frame {
+            cid_base: "tmpmail-mail://localhost/mail/7/cid/",
+        };
+        for line in PAYLOADS.lines() {
+            for (mode, images, frame) in [
+                ("file", false, None),
+                ("file+images", true, None),
+                ("frame", false, Some(&frame)),
+                ("frame+images", true, Some(&frame)),
+            ] {
+                let out = sanitize_mail_html(line, images, frame);
+                let lower = out.to_ascii_lowercase();
+                for bad in [
+                    "<script",
+                    " onerror=\"",
+                    " onload=\"",
+                    "javascript",
+                    "<svg",
+                    "<iframe",
+                    "<object",
+                    "<form",
+                    "<meta",
+                    "<base",
+                    "<link",
+                    "evil.example",
+                    "data:text",
+                    "data:image/svg",
+                    "position",
+                    "inset",
+                    "z-index",
+                    "transform",
+                    "scale",
+                    "zoom",
+                    "rotate",
+                    "offset",
+                    "d\tata",
+                    "opacity",
+                    "-3000px",
+                    "expression(",
+                    "@import",
+                    "/mail/1",
+                    "ping=",
+                ] {
+                    assert!(
+                        !lower.contains(bad),
+                        "{mode}: {bad} in {out:?} from {line:?}"
+                    );
+                }
+                // `ur/**/l(` isn't a URL in CSS (a comment splits the word).
+                if !images && !line.contains("ur/**/l") {
+                    assert!(!out.contains("t.example"), "{mode}: {out:?} from {line:?}");
+                }
+                if images && frame.is_some() {
+                    assert!(!lower.contains("http://b.example"), "{mode}: {out:?}");
+                }
+                // A data: URL is only ever a raster image's src (or, with
+                // images on, a style's raster background).
+                for (i, _) in lower.match_indices("data:") {
+                    let before = &lower[..i];
+                    assert!(
+                        before.ends_with("<img src=\"")
+                            || (images
+                                && before.ends_with("url(")
+                                && lower[i..].starts_with("data:image/png")),
+                        "{mode}: {out:?} from {line:?}"
+                    );
+                }
+            }
+        }
+        // What stays: links, colors, raster data images, https images with
+        // images on.
+        let kept = sanitize_mail_html(
+            r#"<a href="https://e.x/v" style="color:red;top:3px">v</a><img src="data:image/png;base64,AA"><p style="background:url(https://i.example/a.png)">i</p>"#,
+            true,
+            Some(&frame),
+        );
+        assert!(kept.contains(r#"href="https://e.x/v""#), "{kept}");
+        assert!(kept.contains(r#"style="color:red""#), "{kept}");
+        assert!(kept.contains("data:image/png;base64,AA"), "{kept}");
+        assert!(kept.contains("url(https://i.example/a.png)"), "{kept}");
+        // In-page links, alt text that starts with "Data:", and an inline
+        // picture spelled `DATA:` stay.
+        let page = sanitize_mail_html(
+            r##"<a href="#top">top</a><img alt="Data: Q3" src="DATA:image/png;base64,AA">"##,
+            false,
+            None,
+        );
+        assert!(page.contains(r##"href="#top""##), "{page}");
+        assert!(page.contains(r#"alt="Data: Q3""#), "{page}");
+        assert!(page.contains("DATA:image/png;base64,AA"), "{page}");
+        // An escaped font name goes alone; the rest of the style stays.
+        let cjk = sanitize_mail_html(
+            r#"<p style="font-family:'\5FAE\8F6F';color:#333;padding:20px">x</p>"#,
+            false,
+            Some(&frame),
+        );
+        assert!(cjk.contains(r#"style="color:#333;padding:20px""#), "{cjk}");
     }
 }

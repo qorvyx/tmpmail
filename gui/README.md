@@ -463,7 +463,15 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
 1. Mail HTML is sanitized only in Rust (ammonia, `render::sanitize_mail_html`) and never
    enters the app's DOM: lint bans `{@html}`. In the app's frame, a `style` attribute with a
    `url(...)` (or an image function, or a CSS escape) loses just those declarations while
-   images are off; the CLI's `read --html` output is unchanged.
+   images are off; the CLI's `read --html` output is unchanged. With images on, a style may
+   load only `https:` URLs and inline raster `data:` images. In every mode, relative, `//host` and `\\host` URLs are dropped
+   (mail has no base address; they would reach the app's own scheme), `data:` stays only
+   as an image's raster picture (never a link or SVG), and inline styles keep only an
+   allowlist of look-and-layout properties (colors, fonts, spacing, borders, sizes, table
+   and flex layout; not `position`, `inset`, `z-index`, `transform`, `scale`, `zoom`,
+   `opacity`...), no negative margins, comments removed and a declaration holding a CSS
+   escape dropped, so a link can't be laid over the whole mail to catch any click. `cite`
+   attributes go too (ammonia doesn't check them as URLs).
 2. It is served by the `tmpmail-mail` URI scheme with its own CSP header (no scripts, images
    only inline or from the scheme, `https:` only after "Load images"; the sanitizer drops
    plain `http:` images). Inline `cid:` images (from the provider's attachment, or decoded

@@ -76,6 +76,13 @@ what breaks:
   `NUL`, `COM1.pdf`...) gets a `_` in front, a leading `-` becomes `_`, trailing dots and
   spaces go, and a long name is cut at 240 bytes keeping its extension. Drag-out files are
   created new, never written through anything already in their place.
+- **Security: a mail can't turn its whole body into one link.** A link styled
+  `position:fixed` over the whole frame opened the sender's address on any click; inline
+  styles now keep only look-and-layout properties (no `position`, `z-index`, `transform`,
+  `scale`...). Relative and
+  `//host` addresses are dropped (with "Load images" on they reached the app's own mail
+  scheme), a style loads only `https:` (and inline) images, and `data:` stays only as an
+  inline picture.
 
 ## What's new in 0.1.3
 

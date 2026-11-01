@@ -476,7 +476,9 @@ config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
   terminal or make a line read backwards. The desktop app cleans the sender, subject,
   preview, attachment names, links and provider domains the same way before the window
   shows them.
-- `read --html` writes a sanitized copy (no scripts, forms, frames; strict CSP) and
+- `read --html` writes a sanitized copy (no scripts, forms, frames; strict CSP; no
+  relative or `//host` links, `data:` only as an inline picture, and inline styles keep only
+  look-and-layout properties, so nothing can be laid over the mail) and
   **blocks remote images** (tracking pixels) unless you pass `--images` (then they load from
   the sender's servers, Guerrilla Mail's too, not through its proxy). These copies are
   deleted after a day. They are written to `view/` in the state folder, readable only by

@@ -60,7 +60,7 @@ different program. With [cargo-binstall](https://github.com/cargo-bins/cargo-bin
 ```sh
 curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.4/tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz
 tar xzf tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz
-install tmpmail-0.3.4-x86_64-unknown-linux-musl/tmpmail ~/.local/bin/
+install -D -t ~/.local/bin tmpmail-0.3.4-x86_64-unknown-linux-musl/tmpmail
 ```
 
 <details>

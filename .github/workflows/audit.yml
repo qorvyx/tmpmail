@@ -1,0 +1,33 @@
+# Checks Cargo.lock (the CLI's and the desktop app's crates) against the
+# RustSec advisory database on every push to main and every pull request,
+# and once a week, so an advisory published against a released lock file is
+# noticed. Tags aren't checked here: a release is tagged on a main commit
+# this has checked. Advisories without a fix within semver are listed in deny.toml,
+# each with its reason. No install on the host: cargo-deny runs in the
+# action's own container.
+# Actions are pinned by commit SHA, with the tag in a comment.
+name: audit
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          # The lock as committed (never re-resolved), with a toolchain new
+          # enough for every manifest in the workspace (the app needs 1.90).
+          rust-version: stable
+          arguments: --all-features --locked
+          command: check
+          command-arguments: advisories

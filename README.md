@@ -496,6 +496,11 @@ cargo clippy --all-targets
 vhs assets/demo/demo.tape   # re-record the demo (needs vhs, and outbound SMTP for the test mail)
 ```
 
+Every push to `main` and every pull request, and a weekly run, check `Cargo.lock` against the RustSec
+advisory database ([audit workflow](.github/workflows/audit.yml), `cargo deny check
+advisories`). The advisories that have no fix within semver yet are listed in
+[`deny.toml`](deny.toml), each with the reason it is accepted.
+
 The crate is also a library: `tmpmail = { version = "0.3", default-features = false }`
 gives the providers, stored inboxes, watcher and mail sanitizing (`tmpmail::provider`,
 `tmpmail::store`, `tmpmail::watcher`, ...) without the CLI's dependencies. Its API isn't

@@ -1,0 +1,26 @@
+# cargo-deny settings for the advisory check (.github/workflows/audit.yml):
+# `cargo deny check advisories` fails on any RustSec advisory against a crate
+# in Cargo.lock (the CLI's and the desktop app's), except the ones below,
+# which have no fix within semver for now. Each says why it is accepted;
+# recheck them when Tauri, the GTK bindings or ratatui move on.
+
+[advisories]
+ignore = [
+  # glib 0.18: unsound VariantStrIter (fixed in 0.20). Pinned by the GTK 3
+  # bindings Tauri 2 uses on Linux (webkit2gtk, gtk 0.18); the app never
+  # iterates a GVariant string array.
+  { id = "RUSTSEC-2024-0429", reason = "glib 0.18 is pinned by GTK 3 / Tauri; VariantStrIter is not used" },
+  # lru 0.12: IterMut and pop panic-safety unsoundness (fixed in 0.16.3 and
+  # 0.18.2). Pinned by ratatui 0.29 (the TUI's layout cache); moving to
+  # ratatui 0.30 changes its API, which is more than a patch release.
+  { id = "RUSTSEC-2026-0002", reason = "lru 0.12 is pinned by ratatui 0.29, which only calls get_or_insert and resize (no IterMut)" },
+  { id = "RUSTSEC-2026-0253", reason = "lru 0.12 is pinned by ratatui 0.29, which never calls pop; its keys (Rect, Layout) have no Drop that could panic" },
+  # Unmaintained crates, no known vulnerability: paste (ratatui),
+  # proc-macro-error (the GTK 3 macros), zbus_names / zvariant /
+  # zvariant_derive (zbus 5, the app's D-Bus notifications on Linux).
+  { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained (no vulnerability); pulled in by ratatui" },
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained (no vulnerability); pulled in by the GTK 3 macros" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names is unmaintained (no vulnerability); pulled in by zbus 5" },
+  { id = "RUSTSEC-2026-0370", reason = "zvariant is unmaintained (no vulnerability); pulled in by zbus 5" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is unmaintained (no vulnerability); pulled in by zbus 5" },
+]

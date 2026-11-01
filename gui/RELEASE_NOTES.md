@@ -61,6 +61,13 @@ what breaks:
   only started with `http`, so it was listed as a link; the app's Open already refused it,
   but the list now leaves it out (core of CLI 0.3.5), and the app's opener takes only a
   whole absolute `http(s)` URL with a host.
+- **Security: dependencies with published advisories updated.** The TLS stack (rustls
+  0.23.46, rustls-webpki 0.103.16, webpki-root-certs 1.0.11: certificates through the
+  distrusted emSign intermediates are refused), the HTML sanitizer (ammonia 4.2.4), tokio,
+  time 0.3.55 (cookie parsing), quick-xml 0.42 (through plist 1.10) and serde_with 3.21.
+  glib 0.18's advisory stays: Tauri 2 needs the GTK 3 bindings, and the app doesn't use the
+  affected iterator. Two build tools' advisories stay too (deepmerge has no fixed version;
+  minimatch's fix is a new major version a few days old); neither ends up in the app.
 
 ## What's new in 0.1.3
 

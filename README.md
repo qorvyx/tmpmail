@@ -56,6 +56,15 @@ for `copy` (Windows has `clip.exe`), a browser for `read --html` (found through 
 Windows a PowerShell toast), and `less` for long messages (without it, Windows prints them).
 Colors work in the classic `cmd.exe` console too (Windows 10 and later). CI runs the tests on Linux, macOS and Windows.
 
+**Tested on** (by hand unless it says CI):
+
+| System | Version | How | Date |
+|---|---|---|---|
+| Fedora 44 (host) | 0.3.2–0.3.4 (builds from `main`) | every command, the TUI and the MCP server with real mail at mail.tm, DropMail, Guerrilla and tempmail.lol (mail.gw was down, Maildrop not mailed); clipboard, browser and notifications through stand-ins | 2026-10-31 – 11-01 |
+| Ubuntu 26.04 GNOME, Kubuntu 26.10 KDE, Arch KDE (container), Fedora 44 GNOME; Wayland, X11 through Xwayland | 0.3.4 | `copy` with `wl-copy` on all four, `xclip` on Ubuntu, Kubuntu and Arch, `xsel` on Ubuntu; `watch --notify` with the real notification servers, `qr` and zsh/fish completions on Ubuntu and Kubuntu; `read --html` on Ubuntu (Kubuntu's Firefox snap couldn't open it; fixed in 0.3.5) | 2026-11-01 |
+| Windows 11 | 0.3.1, and 0.3.2's console fixes | starts on a clean system, clipboard, `read --html`, colors in `cmd.exe` | 2026-10-31 |
+| macOS | each release | CI only: tests and builds, not tried by hand | – |
+
 Rather have a window? The [desktop app](#desktop-app-preview) is in preview.
 
 ## Use it
@@ -140,8 +149,19 @@ window closed, and has a settings screen. [More](gui/README.md).
 
 <sub>Sample mail.</sub>
 
-It is a **preview**: tested on Linux, built and security-probed in CI on macOS and Windows,
-but not yet tried there by hand. Downloads are on the
+It is a **preview**. **Tested on** (more in [the app's README](gui/README.md#tested-on)):
+
+| System | Version | How | Date |
+|---|---|---|---|
+| Ubuntu 26.04 GNOME 50, Kubuntu 26.10 Plasma 6.7 (Wayland) | 0.1.3 | `.deb`, by hand | 2026-11-01 |
+| Fedora 44 GNOME 50 (Wayland) | 0.1.3 | AppImage, by hand | 2026-11-01 |
+| Arch Plasma 6.8 (Wayland, in a container) | 0.1.3 | AppImage, by hand | 2026-11-01 |
+| Fedora 44 KDE Plasma (X11 in a container, and Wayland), Fedora 44 GNOME 50 (Wayland) | 0.1.2 (pre-release builds) | `.rpm`, by hand | 2026-10-31 |
+| Kubuntu 26.04 KDE Plasma 6.6 (X11, in a container) | 0.1.1 | `.deb`, by hand | 2026-10-31 |
+| Windows 11 | 0.1.0, and 0.1.1 (a release dry-run build) for its fixes | installer, by hand; later versions built and probed in CI only | 2026-10-31 |
+| macOS | each release | built and security-probed in CI only, not tried by hand | – |
+
+On X11 only KDE has been tried; other X11 desktops are still to test. Downloads are on the
 [releases page](https://github.com/qorvyx/tmpmail/releases), under the `gui-v*` releases
 (`https://github.com/qorvyx/tmpmail/releases/download/gui-vVERSION/FILE`), each with
 `SHA256SUMS` and a build attestation (`gh attestation verify FILE --repo qorvyx/tmpmail`):

@@ -196,10 +196,14 @@ pub struct Mail {
     /// The bytes of inline images served for this message's document so
     /// far.
     pub inline_served: usize,
-    /// The listed attachments that couldn't be shown inline for this
-    /// document (too big, past the limit, or the download failed), so other
-    /// names for them don't fetch them again.
+    /// The listed attachments too big to show inline (alone or past the
+    /// message's limit), so other names for them, and later loads of the
+    /// document, don't fetch them again while the message is open.
     pub inline_failed: HashSet<String>,
+    /// The listed attachments whose download failed for this load of the
+    /// document: other names for them don't fetch them again, and a reload
+    /// tries again.
+    pub inline_unreachable: HashSet<String>,
     /// The message source once fetched (raw MIME, or the HTML body).
     pub source: Option<Arc<String>>,
     /// The raw source's inline images are in `inline`, or it couldn't be
@@ -244,10 +248,13 @@ impl Mail {
 
     /// Starts the count of a new load of the message's document (the frame
     /// reloads it when the theme or a view option changes): what it serves
-    /// counts again, and the lookups that failed are tried again.
+    /// counts again, and the names that found nothing are looked up again.
+    /// A download that failed is tried again, but a too big attachment
+    /// stays failed ([`Mail::inline_failed`]): a switch of theme doesn't
+    /// download it again.
     pub fn new_document(&mut self) {
         self.inline_served = 0;
-        self.inline_failed.clear();
+        self.inline_unreachable.clear();
         self.cids.retain(|_, part| part.is_some());
     }
 
@@ -294,6 +301,7 @@ impl Mails {
             cids: HashMap::new(),
             inline_served: 0,
             inline_failed: HashSet::new(),
+            inline_unreachable: HashSet::new(),
             source: None,
             source_images: false,
         }
@@ -363,28 +371,8 @@ fn popup(app: &tauri::AppHandle, shared: &Shared, url: &Url) {
 /// (which could start parameters again in a client that decodes first)
 /// isn't opened.
 fn plain_mailto(url: &Url) -> Option<String> {
-    let decode = |s: &str| {
-        let b = s.as_bytes();
-        let (mut out, mut i) = (Vec::with_capacity(b.len()), 0);
-        while i < b.len() {
-            let hex = |c: u8| (c as char).to_digit(16);
-            match (
-                b[i],
-                b.get(i + 1).and_then(|&c| hex(c)),
-                b.get(i + 2).and_then(|&c| hex(c)),
-            ) {
-                (b'%', Some(h), Some(l)) => {
-                    out.push((h * 16 + l) as u8);
-                    i += 3;
-                }
-                (c, ..) => {
-                    out.push(c);
-                    i += 1;
-                }
-            }
-        }
-        String::from_utf8_lossy(&out).into_owned()
-    };
+    let decode =
+        |s: &str| String::from_utf8_lossy(&tmpmail::render::percent_decode(s)).into_owned();
     let bad_address = |a: &str| {
         a.chars()
             .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '?' | '&' | '#'))
@@ -452,6 +440,9 @@ fn main() {
     let pending: Option<notify::Target> = None;
     let start_hidden = gui.start_minimized && pending.is_none();
     // Drag files a crashed earlier run left behind, off the main thread.
+    // Linux and macOS, where the app runs as many instances as are started
+    // (the single-instance plugin is Windows only, where nothing is
+    // dragged): another running instance's folder is locked, and stays.
     if drag::SUPPORTED && !probing {
         std::thread::spawn(|| drag::clean_leftovers(&std::env::temp_dir()));
     }
@@ -773,6 +764,23 @@ mod tests {
             mail.inline_image("big.png@0"),
             InlineImage::Image(..)
         ));
+    }
+
+    #[test]
+    fn a_failed_inline_attachment_stays_failed_across_reloads() {
+        // Review of the security round: a reload of the document cleared
+        // the failures, so a too big attachment was downloaded again on
+        // every theme or view switch.
+        let mut mail = Mails::entry("a@b.c", Message::default());
+        mail.cids.insert("huge@x".into(), None);
+        mail.inline_failed.insert("attachment 0".into());
+        mail.inline_unreachable.insert("attachment 1".into());
+        mail.new_document();
+        assert!(mail.inline_failed.contains("attachment 0"));
+        // A download that failed is tried again.
+        assert!(mail.inline_unreachable.is_empty());
+        // The name is looked up again, and the worker skips the download.
+        assert!(matches!(mail.inline_image("huge@x"), InlineImage::Unknown));
     }
 
     #[test]

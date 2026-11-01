@@ -24,17 +24,26 @@ const KEEP: Duration = Duration::from_secs(10 * 60);
 /// Whether this build can drag files out.
 pub const SUPPORTED: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
+/// A file in each drag folder that its app keeps locked while it runs, so
+/// another instance's start-up cleanup leaves the folder alone.
+const LOCK: &str = ".lock";
+
 #[derive(Default)]
 pub struct Files {
-    dir: Mutex<Option<TempDir>>,
+    /// The folder, and its locked [`LOCK`] file (none where the file
+    /// system can't lock: the folder is then kept by its age alone).
+    dir: Mutex<Option<(TempDir, Option<std::fs::File>)>>,
     /// Prepared attachments by (message key, index): path and when.
     ready: Mutex<HashMap<(u64, usize), (PathBuf, Instant)>>,
 }
 
 /// Deletes the drag folders an earlier run of the app left in `temp` (it
 /// crashed or was killed before it could): `tmpmail-drag-*` folders, not
-/// links, the user's own, and older than [`KEEP`] (so another running
-/// instance's files stay). Best effort.
+/// links, the user's own, older than [`KEEP`], and not another running
+/// instance's: one whose [`LOCK`] file is locked stays, however old. (The
+/// age also covers an instance that made its folder and hasn't locked it
+/// yet, one whose file system can't lock, and older versions, which made
+/// none.) Best effort.
 pub fn clean_leftovers(temp: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(temp) else {
         return;
@@ -71,10 +80,41 @@ pub fn clean_leftovers(temp: &std::path::Path) {
             .ok()
             .and_then(|t| t.elapsed().ok())
             .is_some_and(|age| age > KEEP);
-        if meta.is_dir() && mine && old {
-            let _ = std::fs::remove_dir_all(entry.path());
+        if !(meta.is_dir() && mine && old) {
+            continue;
         }
+        // Held until the folder is gone: no instance takes a folder it
+        // didn't make, so none can start using it meanwhile.
+        let _lock = match open_lock(&entry.path().join(LOCK), false) {
+            Ok(f) => match f.try_lock() {
+                Ok(()) => Some(f),
+                // A running instance's, or a lock this file system can't
+                // tell: left alone.
+                Err(_) => continue,
+            },
+            // None (an older version's folder, or one whose lock couldn't
+            // be made): the age decides.
+            Err(_) => None,
+        };
+        let _ = std::fs::remove_dir_all(entry.path());
     }
+}
+
+/// Opens (or with `create`, makes) a drag folder's lock file. Never
+/// through a link: a new one is made new, and an existing one must be a
+/// plain file (in a folder of the user's own, which no one else can change).
+fn open_lock(path: &std::path::Path, create: bool) -> std::io::Result<std::fs::File> {
+    let mut open = std::fs::OpenOptions::new();
+    // Writable: some file systems (NFS) lock only a file open for writing.
+    open.read(true).write(true);
+    if create {
+        open.create_new(true);
+    } else if !std::fs::symlink_metadata(path)?.is_file() {
+        return Err(std::io::Error::other("not a plain file"));
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut open, 0o600);
+    open.open(path)
 }
 
 impl Files {
@@ -110,9 +150,14 @@ impl Files {
                 std::fs::set_permissions(made.path(), std::fs::Permissions::from_mode(0o700))
                     .map_err(fail)?;
             }
-            *dir = Some(made);
+            // Locked for as long as this app runs, where the file system
+            // can lock; without it the folder's age keeps it (see `write`).
+            let lock = open_lock(&made.path().join(LOCK), true)
+                .ok()
+                .filter(|f| f.lock().is_ok());
+            *dir = Some((made, lock));
         }
-        let base = dir.as_ref().expect("just made").path();
+        let base = dir.as_ref().expect("just made").0.path();
         let sub = base.join(format!("{key}-{index}"));
         #[cfg_attr(not(unix), allow(unused_mut))]
         let mut builder = std::fs::DirBuilder::new();
@@ -172,7 +217,8 @@ impl Files {
     /// Deletes every prepared file (the app is quitting).
     pub fn clear(&self) {
         self.ready.lock().expect("drag lock").clear();
-        if let Some(dir) = self.dir.lock().expect("drag lock").take() {
+        if let Some((dir, lock)) = self.dir.lock().expect("drag lock").take() {
+            drop(lock);
             let _ = dir.close();
         }
     }
@@ -249,5 +295,35 @@ mod tests {
         clean_leftovers(temp.path());
         assert!(!old.exists());
         assert!(fresh.exists() && other.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn another_running_instance_keeps_its_folder() {
+        // Review of the security round: a second start deleted the drag
+        // folder of an app that had run for more than ten minutes, and
+        // drag-out failed in it until a restart.
+        let temp = tempfile::tempdir().unwrap();
+        let long_ago = std::time::SystemTime::now() - KEEP - Duration::from_secs(60);
+        let folder = |name: &str, at: std::time::SystemTime| {
+            let d = temp.path().join(name);
+            std::fs::create_dir(&d).unwrap();
+            let lock = open_lock(&d.join(LOCK), true).unwrap();
+            std::fs::File::open(&d).unwrap().set_modified(at).unwrap();
+            (d, lock)
+        };
+        let (running, held) = folder("tmpmail-drag-running", long_ago);
+        held.lock().unwrap();
+        // A crashed run's lock is free.
+        let (crashed, free) = folder("tmpmail-drag-crashed", long_ago);
+        drop(free);
+        // One just made, not locked yet, stays by its age.
+        let (fresh, _unlocked) = folder("tmpmail-drag-fresh", std::time::SystemTime::now());
+        clean_leftovers(temp.path());
+        assert!(running.exists() && fresh.exists());
+        assert!(!crashed.exists());
+        drop(held);
+        clean_leftovers(temp.path());
+        assert!(!running.exists());
     }
 }

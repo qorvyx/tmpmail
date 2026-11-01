@@ -523,7 +523,7 @@ impl Front {
                 mails.get(key).map(|m| {
                     (
                         m.inline.contains_key(&listed),
-                        m.inline_failed.contains(&listed),
+                        m.inline_failed.contains(&listed) || m.inline_unreachable.contains(&listed),
                         m.inline_kept(),
                     )
                 })
@@ -538,22 +538,27 @@ impl Front {
                 Some((false, false, kept)) => {
                     // Not fetched when the listing already says it won't fit.
                     let listed_size = att.size.and_then(|s| usize::try_from(s).ok());
+                    // `None` when too big by the listing, `Some(None)` when
+                    // the download failed.
                     let fetched = if listed_size.is_some_and(|len| too_big(len, kept)) {
                         None
                     } else {
-                        app.state.position(&address).and_then(|n| {
+                        Some(app.state.position(&address).and_then(|n| {
                             app.with_inbox_at(n, |p, inbox| p.attachment(inbox, &msg, att))
                                 .ok()
-                        })
+                        }))
                     };
                     let mut mails = self.shared.mails.lock().expect("mails lock");
                     if let Some(m) = mails.get_mut(key) {
-                        match fetched.filter(|b| !too_big(b.len(), m.inline_kept())) {
-                            Some(bytes) => {
+                        match fetched {
+                            Some(Some(bytes)) if !too_big(bytes.len(), m.inline_kept()) => {
                                 m.inline.insert(listed.clone(), (mime, bytes));
                                 part = Some(listed);
                             }
-                            None => {
+                            Some(None) => {
+                                m.inline_unreachable.insert(listed);
+                            }
+                            _ => {
                                 m.inline_failed.insert(listed);
                             }
                         }

@@ -71,7 +71,8 @@ what breaks:
 - **Security: inline images are capped per message.** A mail could name one big
   attachment under a thousand `cid:` names and make the app fetch and keep it a thousand
   times. Images are now kept by the attachment they are (fetched once), at most 64 names
-  are looked up per message, and at most 25 MiB of images are shown for it.
+  are looked up per message, and at most 25 MiB of images are shown for it. An image found
+  too big isn't downloaded again when the theme or a view option changes.
 - **Security: safer saved names.** A suggested name that is a Windows device name (`CON`,
   `NUL`, `COM1.pdf`...) gets a `_` in front, a leading `-` becomes `_`, trailing dots and
   spaces go, and a long name is cut at 240 bytes keeping its extension. Drag-out files are
@@ -84,8 +85,8 @@ what breaks:
   scheme), a style loads only `https:` (and inline) images, and `data:` stays only as an
   inline picture.
 - **Security: hostile mail can't stall the app.** HTML past 4 MiB or nested deeper than
-  1000 elements is shown as its plain text, under a note, instead of being parsed (100 000
-  nested `<div>` took 40 s), and codes and links are found in linear time.
+  1000 elements (as the HTML parser nests them) is shown as its plain text, under a note,
+  instead of being parsed (100 000 nested `<div>` took 40 s), and codes and links are found in linear time.
 - **Security: size limits on provider answers.** Raw messages and attachments are read up
   to 64 MiB (JSON answers a little more), and an attachment's download address is used only
   on the provider's own site, so a hostile answer can't fill the memory or send the
@@ -96,7 +97,7 @@ what breaks:
   title can't carry markup (`<` and `>` show as `‹` and `›`) for servers that format it.
   The mail and source documents carry their own `sandbox` and `frame-ancestors` policy, so
   they are sandboxed wherever they are loaded. Drag-out files left by a crashed run are
-  deleted at the next start.
+  deleted at the next start, never those of another instance still running.
 - **Security: saved attachments are marked as downloaded** on Windows (`Zone.Identifier`)
   and macOS (`com.apple.quarantine`), so the system checks them as it does a browser's.
 

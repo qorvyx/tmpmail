@@ -349,21 +349,21 @@ pub fn not_found() -> Response<Vec<u8>> {
     status(StatusCode::NOT_FOUND)
 }
 
+/// `%XX` escapes decoded, strictly: a `%` that doesn't start one, or bytes
+/// that aren't UTF-8, give nothing.
 fn percent_decode(s: &str) -> Option<String> {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).ok()
+    let b = s.as_bytes();
+    let escapes_whole = b
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| **c == b'%')
+        .all(|(i, _)| {
+            b.get(i + 1..i + 3)
+                .is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit))
+        });
+    escapes_whole
+        .then(|| String::from_utf8(tmpmail::render::percent_decode(s)).ok())
+        .flatten()
 }
 
 #[cfg(test)]
@@ -375,6 +375,9 @@ mod tests {
     fn cid_ids_round_trip() {
         assert_eq!(percent_decode("logo%40x%20y").as_deref(), Some("logo@x y"));
         assert_eq!(percent_decode("bad%4"), None);
+        assert_eq!(percent_decode("bad%+1"), None);
+        assert_eq!(percent_decode("bad%zz"), None);
+        assert_eq!(percent_decode("bad%FF"), None);
     }
 
     fn attachment(filename: &str, content_type: &str) -> Attachment {

@@ -211,7 +211,9 @@ from the page, and the page never names a path, only "attachment N of the opened
 When the pointer reaches an attachment's grip, Rust downloads it into a private temporary
 directory (`tmpmail-drag-*`, mode 0700, one 0700 subdirectory per attachment, the file
 0600 under its sanitized name); dragging the grip then drags that file. Files are deleted
-10 minutes later (when another is prepared) and when the app quits. Not on Windows, where
+10 minutes later (when another is prepared) and when the app quits. The folder holds a
+`.lock` file the app keeps locked while it runs (where the file system can lock), so another
+instance's start-up cleanup leaves it alone. Not on Windows, where
 a drag can hang the whole app (drag-rs #94). Save stays the dependable way.
 
 ## The AppImage
@@ -559,7 +561,8 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    title (the sender's name) never carries any: `<` and `>` are shown as `‹` and `›`, since
    some servers (dunst with `markup = full`) format the title too.
 11. Drag-out files a crashed run left in the temp folder (`tmpmail-drag-*`, the user's own,
-   older than ten minutes) are deleted at the next start.
+   not links, older than ten minutes) are deleted at the next start; a folder whose `.lock`
+   another running instance holds stays, however old.
 12. Windows: the `tmpmail-desktop:` scheme a notification click launches can be opened by
    any program, or a web page the user allows to. The app accepts only
    `tmpmail-desktop://open?inbox=ADDRESS[&message=ID]` (no other key, each once, the shapes

@@ -132,8 +132,9 @@ export interface Events {
   opened: OpenedEvent;
   /** `from_tray`: made from the tray menu, not the window's own request. */
   created: { address: string; from_tray: boolean };
-  /** Creating an inbox failed: why, and what to try. */
-  create_failed: { text: string };
+  /** Creating an inbox failed: why, and what to try. `field` names the
+   * dialog field it is about (a taken label or username), shown there. */
+  create_failed: { text: string; field?: "label" | "user" };
   deleted: { address: string; id: string };
   notice: Notice;
   /** A notification or the tray brought the window back: open this. */

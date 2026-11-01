@@ -50,6 +50,8 @@ class AppState {
   openId = $state<string | null>(null);
   opened = $state<OpenedEvent | null>(null);
   creating = $state(false);
+  /** Why the new inbox dialog's label or username was refused. */
+  createError = $state<{ field: "label" | "user"; text: string } | null>(null);
   query = $state("");
   fresh = new SvelteSet<string>();
   toasts = $state<Toast[]>([]);
@@ -159,6 +161,7 @@ class AppState {
 
   async create(args: CreateArgs): Promise<boolean> {
     this.creating = true;
+    this.createError = null;
     try {
       await api.createInbox(args);
       return true;
@@ -369,7 +372,9 @@ class AppState {
       }),
       on("create_failed", (p) => {
         this.creating = false;
-        this.toast("error", p.text);
+        // A refused field is shown by it in the dialog, if that is open.
+        if (p.field && this.newInboxOpen) this.createError = { field: p.field, text: p.text };
+        else this.toast("error", p.text);
       }),
       on("notice", (p) => this.toast(p.kind, p.text)),
       on("reveal", (p) => {

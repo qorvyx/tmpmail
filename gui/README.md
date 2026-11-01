@@ -10,7 +10,9 @@ preview on `gui-v*` tags; install steps are in the [main README](../README.md#de
 ## Features
 
 - **Inboxes:** create one (provider or "first that works", a username where the provider
-  allows it, a domain from the provider's list, a label), copy the address (click it, the
+  allows it, a domain from the provider's list, a label; a label another inbox has, or a
+  username that is another inbox's label, is refused before anything is created, with the
+  reason under that field and the dialog left open), copy the address (click it, the
   Copy button or `c`), make it the active inbox (the CLI's default, marked with a star),
   check now, and delete it (asks first; deleted at the provider where it can be, then
   forgotten here). Each inbox shows its provider, expiry or lifetime, `Live` when a push

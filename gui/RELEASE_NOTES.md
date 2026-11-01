@@ -8,6 +8,19 @@ weren't tried by hand. On Windows only 0.1.0 was tried by hand, on a clean Windo
 macOS has only been checked by the automated security probe. Please report what breaks:
 <https://github.com/qorvyx/tmpmail/issues>.
 
+## What's new in 0.1.3
+
+- **Names and subjects show decoded.** Mail from tempmail.lol showed encoded sender names
+  and subjects such as `=?utf-8?q?Zo=C3=AB?=` in the message list, the message header and
+  notifications; they now read `Zoë`, as with the other providers (from CLI 0.3.3's core).
+- **A label picks one inbox.** The new inbox dialog accepted a label another inbox already
+  had, or a username that was another inbox's label, and then the CLI's `-i LABEL` matched
+  neither or both. These are now refused before anything is created, with the reason under
+  the label or username field; the dialog stays open so you can change it.
+- **A clearer error when a domain isn't offered** while one provider is down: the
+  unreachable provider is named first, then what the others answered.
+- The TUI crash in short terminals fixed in CLI 0.3.3 doesn't affect the app.
+
 ## What's new in 0.1.2
 
 - **Linux: the window shows the tmpmail icon** in the title bar and the task switcher. KDE

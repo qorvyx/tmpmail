@@ -4,6 +4,8 @@
   import { app } from "./store.svelte";
 
   let dialog: HTMLDialogElement;
+  let userInput: HTMLInputElement;
+  let labelInput: HTMLInputElement;
   let provider = $state("");
   let user = $state("");
   let domain = $state("");
@@ -19,6 +21,7 @@
       user = "";
       domain = "";
       label = "";
+      app.createError = null;
       dialog.showModal();
     } else if (!app.newInboxOpen && dialog.open) {
       dialog.close();
@@ -43,6 +46,21 @@
       },
     );
   });
+
+  // Not once the picked provider chooses the username itself: it isn't sent.
+  const userError = $derived(canUser && app.createError?.field === "user" ? app.createError.text : null);
+  const labelError = $derived(app.createError?.field === "label" ? app.createError.text : null);
+
+  // Put the cursor in the refused field.
+  $effect(() => {
+    if (userError) userInput?.focus();
+    else if (labelError) labelInput?.focus();
+  });
+
+  // Editing the refused field clears its message.
+  function edited(field: "user" | "label") {
+    if (app.createError?.field === field) app.createError = null;
+  }
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
@@ -115,7 +133,11 @@
           <span class="mb-1.5 block text-xs font-semibold">Username <span class="font-normal text-muted">optional</span></span>
           <input
             class="field"
+            bind:this={userInput}
             bind:value={user}
+            oninput={() => edited("user")}
+            aria-invalid={userError ? "true" : undefined}
+            aria-describedby={userError ? "new-inbox-user-error" : undefined}
             disabled={!canUser}
             placeholder={canUser ? "random" : `${picked?.name} picks it`}
             autocomplete="off"
@@ -139,14 +161,30 @@
           {/if}
         </label>
       </div>
+      {#if userError}
+        <p id="new-inbox-user-error" class="-mt-3 text-2xs text-danger" role="alert">{userError}</p>
+      {/if}
       {#if user && !provider}
         <p class="-mt-3 text-2xs text-muted">Only providers that let you pick a username are tried.</p>
       {/if}
 
       <label class="block">
         <span class="mb-1.5 block text-xs font-semibold">Label <span class="font-normal text-muted">optional</span></span>
-        <input class="field" bind:value={label} placeholder="github, shop, newsletter…" maxlength="64" autocomplete="off" />
+        <input
+          class="field"
+          bind:this={labelInput}
+          bind:value={label}
+          oninput={() => edited("label")}
+          aria-invalid={labelError ? "true" : undefined}
+          aria-describedby={labelError ? "new-inbox-label-error" : undefined}
+          placeholder="github, shop, newsletter…"
+          maxlength="64"
+          autocomplete="off"
+        />
       </label>
+      {#if labelError}
+        <p id="new-inbox-label-error" class="-mt-3 text-2xs text-danger" role="alert">{labelError}</p>
+      {/if}
     </div>
 
     <footer class="flex shrink-0 items-center justify-end gap-2 border-t border-rule px-6 py-3.5">

@@ -55,6 +55,16 @@ pub trait Front {
     fn turn(&mut self) {}
 }
 
+/// The create option a [`Watcher::refused`] refusal is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CreateField {
+    /// The label.
+    Label,
+    /// The username (the part before `@`).
+    User,
+}
+
 pub struct Watcher {
     pub app: App,
     pub poller: Poller,
@@ -219,6 +229,27 @@ impl Watcher {
         self.create_with(provider, &CreateOpts::default(), None)
     }
 
+    /// Why the stored inboxes refuse a new inbox with these options, and
+    /// which option it is about, so a form can show it by that field: a
+    /// label another inbox has (or that is its address or local part), or
+    /// a username that is another inbox's label. [`Watcher::create_with`]
+    /// refuses them the same way, before any request. Checked against the
+    /// state file: another tmpmail may have added a label since this one
+    /// last read it.
+    pub fn refused(&self, opts: &CreateOpts, label: Option<&str>) -> Option<(CreateField, String)> {
+        let fresh = self.app.store.load().ok();
+        let state = fresh.as_ref().unwrap_or(&self.app.state);
+        if let Some(Err(e)) = label.map(|l| state.check_label(l, None)) {
+            return Some((CreateField::Label, e.to_string()));
+        }
+        let user = opts.user.as_deref()?;
+        let address = opts.domain.as_ref().map(|d| format!("{user}@{d}"));
+        state
+            .check_user(user, address.as_deref())
+            .err()
+            .map(|e| (CreateField::User, e.to_string()))
+    }
+
     /// [`Watcher::create`] with options (a username, a domain) and a label.
     pub fn create_with(
         &mut self,
@@ -226,18 +257,8 @@ impl Watcher {
         opts: &CreateOpts,
         label: Option<String>,
     ) -> std::result::Result<String, String> {
-        // Checked against the file: another tmpmail may have added a label
-        // since this one last read it.
-        let fresh = self.app.store.load().ok();
-        let state = fresh.as_ref().unwrap_or(&self.app.state);
-        if let Some(l) = &label {
-            state.check_label(l, None).map_err(|e| e.to_string())?;
-        }
-        if let Some(u) = &opts.user {
-            let address = opts.domain.as_ref().map(|d| format!("{u}@{d}"));
-            state
-                .check_user(u, address.as_deref())
-                .map_err(|e| e.to_string())?;
+        if let Some((_, why)) = self.refused(opts, label.as_deref()) {
+            return Err(why);
         }
         let mut inbox = self
             .app
@@ -399,6 +420,38 @@ mod tests {
 
     fn next(rx: &std::sync::mpsc::Receiver<Ev>) -> Ev {
         rx.recv_timeout(Duration::from_secs(5)).expect("an event")
+    }
+
+    #[test]
+    fn a_taken_label_or_name_is_refused_by_field_from_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = Watcher::with_app(App::for_test(dir.path().to_path_buf()));
+        // Another tmpmail adds a labelled inbox after this one loaded.
+        let mut gm = Inbox::new(
+            "guerrilla",
+            "tvidfnke@sharklasers.com".into(),
+            serde_json::Value::Null,
+        );
+        gm.label = Some("gm1".into());
+        w.app.store.update(|s| s.add(gm)).unwrap();
+        let opts = |user: Option<&str>| CreateOpts {
+            user: user.map(Into::into),
+            ..Default::default()
+        };
+        let (field, why) = w.refused(&opts(None), Some("GM1")).unwrap();
+        assert_eq!(field, CreateField::Label);
+        assert!(why.contains("tvidfnke@sharklasers.com"), "{why}");
+        let (field, why) = w.refused(&opts(None), Some("tvidfnke")).unwrap();
+        assert_eq!(field, CreateField::Label);
+        assert!(why.contains("would also match"), "{why}");
+        let (field, why) = w.refused(&opts(Some("gm1")), Some("shop")).unwrap();
+        assert_eq!(field, CreateField::User);
+        assert!(
+            why.starts_with("the name \"gm1\" is already the label of"),
+            "{why}"
+        );
+        assert!(w.refused(&opts(Some("otter")), Some("shop")).is_none());
+        assert!(w.refused(&opts(None), None).is_none());
     }
 
     #[test]

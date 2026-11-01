@@ -15,7 +15,7 @@ use tmpmail::app::{App, Global};
 use tmpmail::config::Config;
 use tmpmail::provider::{self, CreateOpts, Summary};
 use tmpmail::render::clean_line;
-use tmpmail::watcher::{self, Watcher};
+use tmpmail::watcher::{self, CreateField, Watcher};
 
 use crate::notify::{self, Arrivals};
 use crate::{Mails, Shared};
@@ -228,6 +228,7 @@ impl watcher::Front for Front {
                 label,
                 from_tray,
             } => {
+                let asked = label.clone();
                 match w.create_with(provider.as_deref(), &opts, label) {
                     Ok(address) => {
                         // The list first: the window selects the new inbox
@@ -253,11 +254,24 @@ impl watcher::Front for Front {
                         );
                     }
                     Err(e) => {
-                        let text = format!(
-                            "{}. Try another provider, or leave the options empty.",
-                            capital(&e)
-                        );
-                        let _ = self.handle.emit("create_failed", json!({ "text": text }));
+                        // A taken label or username, refused before any
+                        // request: the dialog shows it by that field.
+                        let payload = match w.refused(&opts, asked.as_deref()) {
+                            Some((field, why)) => json!({
+                                "text": format!("{}.", capital(&why)),
+                                "field": match field {
+                                    CreateField::User => "user",
+                                    _ => "label",
+                                },
+                            }),
+                            None => json!({
+                                "text": format!(
+                                    "{}. Try another provider, or leave the options empty.",
+                                    capital(&e)
+                                ),
+                            }),
+                        };
+                        let _ = self.handle.emit("create_failed", payload);
                     }
                 }
                 false

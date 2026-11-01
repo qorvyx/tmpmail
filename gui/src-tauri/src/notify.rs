@@ -581,6 +581,22 @@ mod tests {
     }
 
     #[test]
+    fn headers_the_core_decoded_are_not_decoded_again() {
+        // The core decodes RFC 2047 once (0.3.3); what is left, even text
+        // that looks encoded, is the sender's own and shown as is.
+        let s = summary(
+            "1",
+            "\"Zoë Ünicode\" <hello@example.org>",
+            "Café résumé ✓ =?utf-8?q?not_decoded_again?=",
+            "Code 551177",
+        );
+        let a = arrival("me@x.com", &s);
+        assert_eq!(a.sender, "Zoë Ünicode");
+        assert_eq!(a.subject, "Café résumé ✓ =?utf-8?q?not_decoded_again?=");
+        assert_eq!(a.code.as_deref(), Some("551177"));
+    }
+
+    #[test]
     fn bursts_wait_for_the_group_window() {
         let mut a = Arrivals::default();
         assert!(a.due().is_none());

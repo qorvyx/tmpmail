@@ -283,6 +283,9 @@ dialog[open] {
   outline-offset: 0;
   border-color: var(--color-ring);
 }
+.field[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
 
 kbd,
 .kbd {

@@ -812,7 +812,10 @@ impl Ui {
         let side = (body.width / 3).clamp(24, 36);
         let [left, right] =
             Layout::horizontal([Constraint::Length(side), Constraint::Min(20)]).areas(body);
-        let list_height = (self.messages().len() as u16 + 2).clamp(4, right.height / 3 + 2);
+        // The list's rows plus its borders, at least 4 and at most a third
+        // of the pane plus the borders (that cap wins in a short terminal).
+        let rows = u16::try_from(self.messages().len()).unwrap_or(u16::MAX);
+        let list_height = rows.saturating_add(2).max(4).min(right.height / 3 + 2);
         let [top, bottom] =
             Layout::vertical([Constraint::Length(list_height), Constraint::Min(3)]).areas(right);
 
@@ -1375,6 +1378,77 @@ mod tests {
         assert!(ui.status.as_ref().unwrap().0.contains("Your code"));
         // The cursor stays on the message it was on.
         assert_eq!(ui.summary().unwrap().id, "1");
+    }
+
+    /// A screen with an inbox, mail, a loaded preview and a status line.
+    fn busy_ui() -> Ui {
+        let (tx, _rx) = channel();
+        let mut ui = Ui::new(tx);
+        let mut inbox = Inbox::new("mailtm", "a@x.com".into(), serde_json::Value::Null);
+        inbox.label = Some("shop".into());
+        ui.event(Ev::Inboxes {
+            inboxes: vec![inbox],
+            active: Some("a@x.com".into()),
+        });
+        let list: Vec<Summary> = (1..=12)
+            .map(|n| summary(&n.to_string(), "Your verification code"))
+            .collect();
+        ui.event(Ev::Listed {
+            address: "a@x.com".into(),
+            result: Ok(list),
+            live: true,
+        });
+        ui.event(Ev::Opened {
+            address: "a@x.com".into(),
+            id: "1".into(),
+            result: Ok(Box::new(Message {
+                id: "1".into(),
+                from: "Demo <hello@example.org>".into(),
+                subject: "Your verification code".into(),
+                text: Some("Your code is 482913.\n".repeat(40)),
+                ..Default::default()
+            })),
+        });
+        ui.say("a status line that is longer than a small terminal is wide");
+        ui
+    }
+
+    #[test]
+    fn tiny_terminals_draw_without_panicking() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let sizes = (1..=40u16)
+            .flat_map(|w| (1..=10u16).map(move |h| (w, h)))
+            .chain([(120, 7), (10, 4), (30, 8), (80, 24), (200, 3)]);
+        let (tx, _rx) = channel();
+        let mut screens = vec![Ui::new(tx)]; // no inboxes yet
+        for focus in [Focus::Inboxes, Focus::Messages, Focus::Preview] {
+            let mut ui = busy_ui();
+            ui.focus = focus;
+            screens.push(ui);
+        }
+        let mut ui = busy_ui();
+        ui.focus = Focus::Preview;
+        ui.jump(true); // scrolled to the end
+        screens.push(ui);
+        let mut ui = busy_ui();
+        ui.help = true;
+        screens.push(ui);
+        let mut ui = busy_ui();
+        ui.open_picker(0);
+        screens.push(ui);
+        let mut ui = busy_ui();
+        ui.confirm = Some(Confirm::Drop("a@x.com".into()));
+        screens.push(ui);
+        // Each screen is redrawn at every size, as a resize would.
+        for (w, h) in sizes {
+            let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+            for ui in &mut screens {
+                terminal
+                    .draw(|f| ui.draw(f))
+                    .unwrap_or_else(|e| panic!("{w}x{h}: {e}"));
+            }
+        }
     }
 
     fn press(ui: &mut Ui, app: &mut App, code: KeyCode) {

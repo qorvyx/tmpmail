@@ -5063,6 +5063,7 @@ dependencies = [
  "clap_mangen",
  "dirs",
  "html2text",
+ "html5ever 0.40.1",
  "libc",
  "mockito",
  "qrcode",

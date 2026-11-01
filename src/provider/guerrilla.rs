@@ -172,25 +172,10 @@ fn unproxy_images(html: &str, web: &str) -> String {
         .into_owned()
 }
 
-/// A query value as PHP's `urlencode` writes it: `%XX` bytes, `+` a space.
+/// A query value as PHP's `urlencode` writes it: `%XX` bytes, `+` a space
+/// (an encoded plus is `%2B`, so it survives the swap).
 fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let hex = |b: u8| (b as char).to_digit(16);
-        match (bytes[i], bytes.get(i + 1), bytes.get(i + 2)) {
-            (b'%', Some(&h), Some(&l)) if hex(h).is_some() && hex(l).is_some() => {
-                out.push((hex(h).unwrap() * 16 + hex(l).unwrap()) as u8);
-                i += 3;
-            }
-            (b, _, _) => {
-                out.push(if b == b'+' { b' ' } else { b });
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8_lossy(&crate::render::percent_decode(&s.replace('+', " "))).into_owned()
 }
 
 /// Guerrilla HTML-escapes subjects and excerpts.

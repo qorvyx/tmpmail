@@ -493,7 +493,8 @@ config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
   instead, the one place outside its sandbox it may always read. The snap can write there,
   so that folder is used through open folder handles (a link put anywhere on the way is
   refused, and the state folder used instead), and only tmpmail's own `tmpmail-*.html`
-  copies there are ever deleted.
+  copies there (and the first builds' `ID.html` ones, checked by their contents) are ever
+  deleted, in every snap's folder, so an earlier browser's go too.
 - Attachment names are sanitized so they can't escape the target directory, and
   existing files are never overwritten (nor written through a link put in their place);
   on Windows and macOS saved files are marked as downloaded from the internet;

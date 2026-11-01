@@ -497,13 +497,35 @@ const VIEW_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
 const SNAP_VIEWS: &str = "tmpmail-view";
 
 /// The start of every view file's name. In a snap's folder only files
-/// named so are ever deleted.
+/// named so, and the first builds' copies ([`is_snap_view`]), are ever
+/// deleted.
 const VIEW_PREFIX: &str = "tmpmail-";
 
-/// Whether a file in a snap's view folder is a copy tmpmail wrote.
+/// How every view file tmpmail writes starts
+/// ([`crate::render::safe_html_document`]).
 #[cfg(target_os = "linux")]
-fn is_snap_view(name: &str) -> bool {
-    name.starts_with(VIEW_PREFIX) && name.ends_with(".html")
+const VIEW_HEAD: &str = "<!doctype html>\n<html><head><meta charset=\"utf-8\">\n\
+     <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src ";
+
+/// Whether a file in the snap view folder `dir` is a copy tmpmail wrote:
+/// named `tmpmail-*.html`, or as the first builds that wrote there named
+/// them, a message id and `.html` (letters, digits, `-` and `_`, with a
+/// digit) that starts as tmpmail's copies do, so a user's `report-2024.html`
+/// stays.
+#[cfg(target_os = "linux")]
+fn is_snap_view(dir: &ViewDir, name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".html") else {
+        return false;
+    };
+    if name.starts_with(VIEW_PREFIX) {
+        return true;
+    }
+    let id_shaped = !stem.is_empty()
+        && stem
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && stem.bytes().any(|b| b.is_ascii_digit());
+    id_shaped && dir.starts_with(name, VIEW_HEAD.as_bytes())
 }
 
 /// Whether a file in the state folder's `view` is a copy tmpmail wrote:
@@ -577,12 +599,13 @@ fn write_view_in(
             let snaps = home.join("snap");
             let tried = ViewDir::open(&snaps, &[snap, "common", SNAP_VIEWS]).and_then(|dir| {
                 let path = dir.write(&name, contents)?;
-                dir.prune(VIEW_MAX_AGE, is_snap_view);
+                dir.prune(VIEW_MAX_AGE, |n| is_snap_view(&dir, n));
                 Ok(path)
             });
             match tried {
                 Ok(path) => {
                     prune_state_views(state);
+                    prune_other_snaps(&snaps, Some(snap));
                     return Ok(View { path, note: None });
                 }
                 Err(e) => Some(format!(
@@ -593,6 +616,11 @@ fn write_view_in(
         }
         _ => None,
     };
+    // Copies an earlier browser (another snap) was given.
+    #[cfg(target_os = "linux")]
+    if let Some(home) = home {
+        prune_other_snaps(&home.join("snap"), None);
+    }
     #[cfg(not(target_os = "linux"))]
     let note = {
         let _ = (home, snap);
@@ -612,6 +640,24 @@ fn write_view_in(
 fn prune_state_views(state: &Path) {
     if let Ok(dir) = ViewDir::open_existing(state, &["view"]) {
         dir.prune(VIEW_MAX_AGE, is_state_view);
+    }
+}
+
+/// Prunes the view files in every snap's `common/tmpmail-view` but
+/// `except`'s, reached as [`write_view_in`] reaches its own: through open
+/// folders from `snaps` (`~/snap`), refusing links, never creating any.
+#[cfg(target_os = "linux")]
+fn prune_other_snaps(snaps: &Path, except: Option<&str>) {
+    let Ok(dir) = ViewDir::open_existing(snaps, &[]) else {
+        return;
+    };
+    for name in dir.names() {
+        if Some(name.as_str()) == except {
+            continue;
+        }
+        if let Ok(views) = dir.open_below(&[&name, "common", SNAP_VIEWS]) {
+            views.prune(VIEW_MAX_AGE, |n| is_snap_view(&views, n));
+        }
     }
 }
 
@@ -639,17 +685,34 @@ impl ViewDir {
 
     #[cfg(unix)]
     fn open_at(base: &Path, below: &[&str], create: bool) -> std::io::Result<ViewDir> {
-        use rustix::fs::{CWD, Mode, OFlags, fchmod, mkdirat, openat};
-        let failed = |what: &str, path: &Path, e: rustix::io::Errno| {
-            std::io::Error::new(
-                std::io::Error::from(e).kind(),
-                format!("{what} {}: {}", path.display(), std::io::Error::from(e)),
-            )
-        };
+        use rustix::fs::{CWD, Mode, OFlags, openat};
         let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
-        let mut fd =
-            openat(CWD, base, flags, Mode::empty()).map_err(|e| failed("open", base, e))?;
-        let mut path = base.to_path_buf();
+        let fd =
+            openat(CWD, base, flags, Mode::empty()).map_err(|e| Self::failed("open", base, e))?;
+        Self::walk(fd, base.to_path_buf(), below, create)
+    }
+
+    #[cfg(unix)]
+    fn failed(what: &str, path: &Path, e: rustix::io::Errno) -> std::io::Error {
+        std::io::Error::new(
+            std::io::Error::from(e).kind(),
+            format!("{what} {}: {}", path.display(), std::io::Error::from(e)),
+        )
+    }
+
+    /// Opens each of `below` inside the one before, from the open folder
+    /// `fd` (at `path`), refusing a link. With `create` the last is created
+    /// if missing and made 0700.
+    #[cfg(unix)]
+    fn walk(
+        mut fd: std::os::fd::OwnedFd,
+        mut path: PathBuf,
+        below: &[&str],
+        create: bool,
+    ) -> std::io::Result<ViewDir> {
+        use rustix::fs::{Mode, OFlags, fchmod, mkdirat, openat};
+        let failed = Self::failed;
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
         for (i, name) in below.iter().enumerate() {
             path.push(name);
             let last = i + 1 == below.len();
@@ -686,6 +749,53 @@ impl ViewDir {
             std::fs::create_dir_all(&path)?;
         }
         Ok(ViewDir { path })
+    }
+
+    /// The names in the folder (`.` and `..` left out).
+    #[cfg(target_os = "linux")]
+    fn names(&self) -> Vec<String> {
+        let Ok(mut entries) = rustix::fs::Dir::read_from(&self.fd) else {
+            return Vec::new();
+        };
+        let mut names = Vec::new();
+        while let Some(Ok(entry)) = entries.read() {
+            if let Ok(name) = entry.file_name().to_str()
+                && name != "."
+                && name != ".."
+            {
+                names.push(name.to_string());
+            }
+        }
+        names
+    }
+
+    /// Opens each of `below` inside the one before, from this folder,
+    /// refusing a link and creating nothing.
+    #[cfg(target_os = "linux")]
+    fn open_below(&self, below: &[&str]) -> std::io::Result<ViewDir> {
+        Self::walk(rustix::io::dup(&self.fd)?, self.path.clone(), below, false)
+    }
+
+    /// Whether the regular file `name` here starts with `head` (read
+    /// without following a link).
+    #[cfg(target_os = "linux")]
+    fn starts_with(&self, name: &str, head: &[u8]) -> bool {
+        use rustix::fs::{Mode, OFlags, openat};
+        let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
+        let Ok(fd) = openat(&self.fd, name, flags, Mode::empty()) else {
+            return false;
+        };
+        let mut f = std::fs::File::from(fd);
+        if !f.metadata().is_ok_and(|m| m.is_file()) {
+            return false;
+        }
+        let mut got = Vec::with_capacity(head.len());
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(&mut f, head.len() as u64),
+            &mut got,
+        )
+        .is_ok()
+            && got == head
     }
 
     /// Writes `name` new, readable only by the user, and returns its path.
@@ -1240,5 +1350,57 @@ mod tests {
         let none = write_view_in(&state, Some(&home), Some("chromium"), "5.html", "y").unwrap();
         assert_eq!(none.path, state.join("view/tmpmail-5.html"));
         assert!(none.note.is_some());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn old_and_other_snaps_view_files_are_pruned() {
+        // Review of the security round: copies the first builds named
+        // `ID.html`, and copies in another snap's folder (the browser
+        // changed), were never deleted.
+        let dir = tempfile::tempdir().unwrap();
+        let (state, home) = (dir.path().join("state"), dir.path().join("home"));
+        let views = |snap: &str| {
+            let d = home.join("snap").join(snap).join("common/tmpmail-view");
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        };
+        let (ff, chromium) = (views("firefox"), views("chromium"));
+        let legacy = ff.join("6650a1b2c3d4e5f6a7b8c9d0.html");
+        let mine = ff.join("thesis.html");
+        let elsewhere = chromium.join("tmpmail-1.html");
+        let elsewhere_legacy = chromium.join("12345.html");
+        let theirs = chromium.join("notes.html");
+        let view = crate::render::safe_html_document("s", "<p>x</p>", false);
+        let report = ff.join("report-2024.html");
+        for f in [
+            &legacy,
+            &mine,
+            &elsewhere,
+            &elsewhere_legacy,
+            &theirs,
+            &report,
+        ] {
+            let ours = [&legacy, &elsewhere_legacy].contains(&f);
+            std::fs::write(f, if ours { view.as_str() } else { "x" }).unwrap();
+            age(f);
+        }
+        // Another snap's folder through a link is left alone.
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(outside.join("common/tmpmail-view")).unwrap();
+        let bait = outside.join("common/tmpmail-view/tmpmail-2.html");
+        std::fs::write(&bait, "x").unwrap();
+        age(&bait);
+        std::os::unix::fs::symlink(&outside, home.join("snap/linked")).unwrap();
+        write_view_in(&state, Some(&home), Some("firefox"), "3.html", "y").unwrap();
+        assert!(!legacy.exists() && mine.exists() && report.exists());
+        assert!(!elsewhere.exists() && !elsewhere_legacy.exists() && theirs.exists());
+        assert!(bait.exists());
+        // With a browser that isn't a snap, the snaps' copies go too.
+        let last = ff.join("tmpmail-3.html");
+        age(&last);
+        write_view_in(&state, Some(&home), None, "4.html", "y").unwrap();
+        assert!(!last.exists() && mine.exists());
+        assert!(bait.exists());
     }
 }

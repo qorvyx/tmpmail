@@ -149,7 +149,7 @@ impl Http {
             ))),
             Err(e) => Err(Error::Unreachable {
                 provider: self.provider.to_string(),
-                detail: if e.kind() == std::io::ErrorKind::TimedOut {
+                detail: if timed_out(&e) {
                     "request timed out".to_string()
                 } else {
                     root_cause(&e)
@@ -279,6 +279,32 @@ fn read_capped(r: impl std::io::Read, limit: usize, hint: u64) -> std::io::Resul
     Ok((body, more))
 }
 
+/// Whether a read of a body failed for the request's timeout. reqwest's
+/// blocking reader reports it as an error of kind `Other` wrapping its own
+/// timeout error, and `io::Error::source` skips the wrapped error itself, so
+/// it is reached through `get_ref` and its chain read from there.
+fn timed_out(e: &std::io::Error) -> bool {
+    if e.kind() == std::io::ErrorKind::TimedOut {
+        return true;
+    }
+    let mut cur = e
+        .get_ref()
+        .map(|inner| inner as &(dyn std::error::Error + 'static));
+    while let Some(err) = cur {
+        if err
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::TimedOut)
+            || err
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(reqwest::Error::is_timeout)
+        {
+            return true;
+        }
+        cur = err.source();
+    }
+    false
+}
+
 fn root_cause(e: &(dyn std::error::Error + 'static)) -> String {
     let mut cur = e;
     while let Some(next) = cur.source() {
@@ -367,6 +393,36 @@ mod tests {
         assert_eq!(timeout_secs(Some("soon"), 45), 45);
         assert_eq!(timeout_secs(Some("soon"), 0), 20);
         assert_eq!(timeout_secs(Some("0"), 45), 45);
+    }
+
+    #[test]
+    fn a_body_that_stalls_is_a_timeout() {
+        // Review of the security round: reqwest reports a body read's
+        // timeout as `Other`, so it was shown as its inner message.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut req = BufReader::new(conn.try_clone().unwrap());
+            let mut line = String::new();
+            while req.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            let _ = conn.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\n{\"a\":");
+            let _ = conn.flush();
+            // Stalls past the client's timeout, then goes.
+            sleep(Duration::from_secs(3));
+        });
+        let cache = Mutex::new(None);
+        let resp = cached(&cache, Duration::from_secs(1))
+            .get(url)
+            .send()
+            .unwrap();
+        match Http::new("test").capped(resp, 1000) {
+            Err(Error::Unreachable { detail, .. }) => assert_eq!(detail, "request timed out"),
+            other => panic!("{other:?}"),
+        }
+        server.join().unwrap();
     }
 
     #[test]

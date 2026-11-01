@@ -10,6 +10,7 @@ pub mod config;
 pub mod error;
 pub mod extract;
 mod http;
+mod lines;
 #[cfg(feature = "cli")]
 mod mcp;
 pub mod provider;

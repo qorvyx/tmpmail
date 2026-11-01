@@ -133,39 +133,55 @@ enum Line {
 /// is longer than [`MAX_LINE`] is reported, not fatal; the rest of a long
 /// one is skipped.
 fn read_line(r: &mut impl BufRead) -> std::io::Result<Option<Line>> {
-    let mut buf = Vec::new();
-    let n = std::io::Read::take(&mut *r, MAX_LINE as u64 + 1).read_until(b'\n', &mut buf)?;
-    if n == 0 {
-        return Ok(None);
-    }
-    if buf.last() != Some(&b'\n') && buf.len() > MAX_LINE {
-        // Skip to the end of the line.
-        loop {
-            let chunk = r.fill_buf()?;
-            if chunk.is_empty() {
-                break;
-            }
-            match chunk.iter().position(|&b| b == b'\n') {
-                Some(i) => {
-                    r.consume(i + 1);
-                    break;
-                }
-                None => {
-                    let len = chunk.len();
-                    r.consume(len);
-                }
-            }
+    Ok(match crate::lines::read_line(r, MAX_LINE)? {
+        None => None,
+        Some(crate::lines::Line::TooLong) => {
+            crate::lines::skip_line(r)?;
+            Some(Line::TooLong)
         }
-        return Ok(Some(Line::TooLong));
-    }
-    Ok(Some(match String::from_utf8(buf) {
-        Ok(s) => Line::Text(s),
-        Err(_) => Line::NotUtf8,
-    }))
+        Some(crate::lines::Line::Text(buf)) => Some(match String::from_utf8(buf) {
+            Ok(s) => Line::Text(s),
+            Err(_) => Line::NotUtf8,
+        }),
+    })
 }
 
-/// Running tool calls by request id, with the flag that cancels each one.
-type Pending = Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>;
+/// The tool calls whose threads are running, by a token of their own: a
+/// cancelled call keeps its entry until its thread ends (it may run on for a
+/// while), and a new call may reuse its request id meanwhile.
+type Pending = Arc<Mutex<Calls>>;
+
+#[derive(Default)]
+struct Calls {
+    next: u64,
+    /// Each call's request id (as JSON text) and the flag that cancels it.
+    running: HashMap<u64, (String, Arc<AtomicBool>)>,
+}
+
+impl Calls {
+    /// Whether a call with request id `key` runs and isn't cancelled.
+    fn live(&self, key: &str) -> bool {
+        self.running
+            .values()
+            .any(|(id, cancel)| id == key && !cancel.load(Ordering::Relaxed))
+    }
+
+    /// Notes a call's thread as running and returns its token.
+    fn start(&mut self, key: String, cancel: Arc<AtomicBool>) -> u64 {
+        self.next += 1;
+        self.running.insert(self.next, (key, cancel));
+        self.next
+    }
+
+    /// Cancels the calls running under request id `key`.
+    fn cancel(&self, key: &str) {
+        for (id, cancel) in self.running.values() {
+            if id == key {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+}
 
 type RpcResult = std::result::Result<Value, (i64, String)>;
 
@@ -185,9 +201,8 @@ fn handle(msg: Value, global: &Global, pending: &Pending) -> Option<Value> {
     let Some(id) = msg.get("id").cloned() else {
         if method == Some("notifications/cancelled")
             && let Some(req) = msg.pointer("/params/requestId")
-            && let Some(flag) = pending.lock().unwrap().get(&req.to_string())
         {
-            flag.store(true, Ordering::Relaxed);
+            pending.lock().unwrap().cancel(&req.to_string());
         }
         return None;
     };
@@ -199,11 +214,10 @@ fn handle(msg: Value, global: &Global, pending: &Pending) -> Option<Value> {
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools() })),
         "tools/call" => {
-            let running = pending.lock().unwrap();
-            // A cancelled call no longer counts, though its thread may run
-            // on until it notices.
-            let live = |key: &String| running.get(key).is_some_and(|c| !c.load(Ordering::Relaxed));
-            if live(&id.to_string()) {
+            let calls = pending.lock().unwrap();
+            // A cancelled call's id may be used again; its thread still
+            // counts against the limit until it ends.
+            if calls.live(&id.to_string()) {
                 // Not under that id: the client would take it as the
                 // running call's answer.
                 return Some(error_reply(
@@ -212,7 +226,7 @@ fn handle(msg: Value, global: &Global, pending: &Pending) -> Option<Value> {
                     &format!("invalid request: a call with id {id} is already running"),
                 ));
             }
-            if running.keys().filter(|k| live(k)).count() >= MAX_RUNNING {
+            if calls.running.len() >= MAX_RUNNING {
                 return Some(error_reply(
                     id,
                     -32000,
@@ -221,7 +235,7 @@ fn handle(msg: Value, global: &Global, pending: &Pending) -> Option<Value> {
                     ),
                 ));
             }
-            drop(running);
+            drop(calls);
             spawn_call(id, params, global.clone(), pending.clone());
             return None;
         }
@@ -238,14 +252,17 @@ fn reply(id: Value, result: RpcResult) -> Value {
 }
 
 fn spawn_call(id: Value, params: Value, global: Global, pending: Pending) {
-    let key = id.to_string();
     let cancel = Arc::new(AtomicBool::new(false));
-    pending.lock().unwrap().insert(key.clone(), cancel.clone());
+    let token = pending
+        .lock()
+        .unwrap()
+        .start(id.to_string(), cancel.clone());
     std::thread::spawn(move || {
         let result =
             std::panic::catch_unwind(AssertUnwindSafe(|| call(&params, &global, cancel.clone())))
                 .unwrap_or_else(|_| Err((-32603, "internal error".to_string())));
-        pending.lock().unwrap().remove(&key);
+        // Its own entry only: a later call may have the same id.
+        pending.lock().unwrap().running.remove(&token);
         // The spec says a cancelled request gets no response.
         if !cancel.load(Ordering::Relaxed) {
             // A failed write means the client is gone; the main loop sees EOF.
@@ -907,8 +924,8 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
             Arc::new(AtomicBool::new(false)),
         );
-        pending.lock().unwrap().insert("7".into(), num.clone());
-        pending.lock().unwrap().insert("\"a\"".into(), text.clone());
+        pending.lock().unwrap().start("7".into(), num.clone());
+        pending.lock().unwrap().start("\"a\"".into(), text.clone());
         let global = Global::default();
         let cancel = |id: Value| {
             let msg = json!({ "jsonrpc": "2.0", "method": "notifications/cancelled",
@@ -920,6 +937,27 @@ mod tests {
         cancel(json!(7));
         cancel(json!("a"));
         assert!(num.load(Ordering::Relaxed) && text.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_cancelled_call_ending_late_leaves_a_new_call_with_its_id() {
+        // Review of the security round: the old thread's `remove(id)`
+        // deleted the entry of a new call that reused the id.
+        let mut calls = Calls::default();
+        let old = Arc::new(AtomicBool::new(false));
+        let first = calls.start("7".into(), old.clone());
+        calls.cancel("7");
+        assert!(!calls.live("7"));
+        let new = Arc::new(AtomicBool::new(false));
+        calls.start("7".into(), new.clone());
+        assert!(calls.live("7"));
+        // The cancelled call's thread ends now.
+        calls.running.remove(&first);
+        assert!(calls.live("7"));
+        assert_eq!(calls.running.len(), 1);
+        // A cancel reaches the new call.
+        calls.cancel("7");
+        assert!(new.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -1030,17 +1068,19 @@ mod tests {
         pending
             .lock()
             .unwrap()
-            .insert(json!(7).to_string(), Arc::new(AtomicBool::new(false)));
+            .start(json!(7).to_string(), Arc::new(AtomicBool::new(false)));
         let call =
             |id: i64| json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {} });
         let dup = handle(call(7), &global, &pending).unwrap();
         assert_eq!(dup["error"]["code"], -32600);
         assert_eq!(dup["id"], Value::Null);
-        for i in 0..MAX_RUNNING {
+        // Cancelled calls whose threads still run count too (review of the
+        // security round: they didn't, so cancels let threads pile up).
+        for i in 1..MAX_RUNNING {
             pending
                 .lock()
                 .unwrap()
-                .insert(format!("x{i}"), Arc::new(AtomicBool::new(false)));
+                .start(format!("x{i}"), Arc::new(AtomicBool::new(true)));
         }
         let busy = handle(call(8), &global, &pending).unwrap();
         assert_eq!(busy["error"]["code"], -32000);

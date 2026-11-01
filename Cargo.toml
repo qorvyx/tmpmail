@@ -34,6 +34,9 @@ clap_complete = { version = "4.6.11", optional = true }
 clap_mangen = { version = "0.3.3", optional = true }
 dirs = "7.0.0"
 html2text = "0.17.1"
+# The parser ammonia uses, to measure how deep a mail nests before parsing
+# it for real (render::html_too_large).
+html5ever = "0.40.1"
 qrcode = { version = "0.14.1", optional = true }
 rand = "0.9"
 # `unstable-rendered-line-info`: Paragraph::line_count, so the TUI preview

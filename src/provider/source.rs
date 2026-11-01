@@ -205,7 +205,7 @@ fn value_and_params(header: &str) -> (String, Vec<(String, String)>) {
                     text = rest.to_string();
                 }
             }
-            text = String::from_utf8_lossy(&percent_decode(&text)).into_owned();
+            text = String::from_utf8_lossy(&crate::render::percent_decode(&text)).into_owned();
         }
         // Sorted, so the pieces of one name are next to each other.
         match joined.last_mut() {
@@ -257,32 +257,6 @@ fn unquote(v: &str) -> String {
         }
         None => v.to_string(),
     }
-}
-
-pub(crate) fn percent_decode(s: &str) -> Vec<u8> {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        let pair = (b[i] == b'%')
-            .then(|| Some((hex(*b.get(i + 1)?)?, hex(*b.get(i + 2)?)?)))
-            .flatten();
-        match pair {
-            Some((h, l)) => {
-                out.push(h << 4 | l);
-                i += 3;
-            }
-            None => {
-                out.push(b[i]);
-                i += 1;
-            }
-        }
-    }
-    out
-}
-
-fn hex(b: u8) -> Option<u8> {
-    (b as char).to_digit(16).map(|d| d as u8)
 }
 
 /// The parts of a multipart body between its `--boundary` lines.
@@ -373,8 +347,8 @@ fn quoted_printable(data: &[u8]) -> Vec<u8> {
             }
             let pair = data
                 .get(i + 1)
-                .and_then(|&h| hex(h))
-                .zip(data.get(i + 2).and_then(|&l| hex(l)));
+                .and_then(|&h| crate::render::hex_digit(h))
+                .zip(data.get(i + 2).and_then(|&l| crate::render::hex_digit(l)));
             if let Some((h, l)) = pair {
                 out.push(h << 4 | l);
                 i += 3;
@@ -454,7 +428,7 @@ pub fn inline_images(raw: &[u8]) -> HashMap<String, (String, Vec<u8>)> {
 /// A `cid:` URL's id as a `Content-ID` has it: percent-decoded (RFC 2392,
 /// so `a%40b` is `a@b`), without angle brackets.
 pub fn cid_of_url(id: &str) -> String {
-    let id = String::from_utf8_lossy(&percent_decode(id.trim())).into_owned();
+    let id = String::from_utf8_lossy(&crate::render::percent_decode(id.trim())).into_owned();
     id.trim_start_matches('<').trim_end_matches('>').to_string()
 }
 

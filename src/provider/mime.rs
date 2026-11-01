@@ -124,18 +124,14 @@ fn quoted(text: &str) -> Option<Vec<u8>> {
         match b {
             b'_' => out.push(b' '),
             b'=' => {
-                let hi = hex(bytes.next()?)?;
-                let lo = hex(bytes.next()?)?;
+                let hi = crate::render::hex_digit(bytes.next()?)?;
+                let lo = crate::render::hex_digit(bytes.next()?)?;
                 out.push(hi << 4 | lo);
             }
             _ => out.push(b),
         }
     }
     Some(out)
-}
-
-fn hex(b: u8) -> Option<u8> {
-    (b as char).to_digit(16).map(|d| d as u8)
 }
 
 fn base64(text: &str) -> Option<Vec<u8>> {

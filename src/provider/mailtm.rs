@@ -418,21 +418,18 @@ const MAX_SSE_LINE: usize = 1 << 20;
 /// or an error for a line past [`MAX_SSE_LINE`]: an endless line would
 /// otherwise grow without bound while the idle limit never fires.
 fn sse_line(reader: &mut impl BufRead) -> std::io::Result<Option<Vec<u8>>> {
-    use std::io::Read;
-    let mut line = Vec::new();
-    let n = reader
-        .take(MAX_SSE_LINE as u64 + 1)
-        .read_until(b'\n', &mut line)?;
-    if n == 0 {
-        return Ok(None);
+    match crate::lines::read_line(reader, MAX_SSE_LINE)? {
+        None => Ok(None),
+        Some(crate::lines::Line::TooLong) => {
+            Err(std::io::Error::other("a line of the stream is too long"))
+        }
+        Some(crate::lines::Line::Text(mut line)) => {
+            while matches!(line.last(), Some(b'\n' | b'\r')) {
+                line.pop();
+            }
+            Ok(Some(line))
+        }
     }
-    if line.last() != Some(&b'\n') && line.len() > MAX_SSE_LINE {
-        return Err(std::io::Error::other("a line of the stream is too long"));
-    }
-    while matches!(line.last(), Some(b'\n' | b'\r')) {
-        line.pop();
-    }
-    Ok(Some(line))
 }
 
 impl PushStream for Mercure {

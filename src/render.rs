@@ -1,7 +1,9 @@
 //! Turning untrusted mail content into something safe to print or open.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 /// Removes what could rewrite the user's terminal or disguise the text:
 /// terminal escape sequences (CSI and OSC sequences and the other ESC
@@ -188,96 +190,306 @@ pub const HTML_TOO_LARGE: &str = "This message's HTML is too large or too deeply
      show as it was sent: here is its text, without the layout.";
 
 /// Whether `html` is past [`MAX_HTML`] or nests elements deeper than
-/// [`MAX_HTML_DEPTH`]. Counted by a linear scan that reads tags as the HTML
-/// parser does where it matters for depth: a tag starts with `<` and a
-/// letter; comments, attribute values and the text of `script`, `style`,
-/// `textarea` and `title` hold no tags; `/>` doesn't close an HTML element;
-/// an end tag closes only an element that is open (and those opened inside
-/// it); void elements (`<br>`) and ones the parser closes on its own (`<p>`,
-/// `<li>`, `<td>`...) don't count.
+/// [`MAX_HTML_DEPTH`]. The size is checked first; the depth is measured by
+/// [`depth_past`].
 pub fn html_too_large(html: &str) -> bool {
+    // A message's body is checked several times (its text, its document
+    // in each theme, its `cid:` names): the last few answers are kept, by a
+    // hash of the body.
+    // The hash's key is random and this thread's own, so a sender can't
+    // make a deep body collide with a shallow one.
+    thread_local! {
+        static KEY: std::hash::RandomState = std::hash::RandomState::new();
+        static LAST: RefCell<Vec<(u64, usize, bool)>> = const { RefCell::new(Vec::new()) };
+    }
     if html.len() > MAX_HTML {
         return true;
     }
-    const UNCOUNTED: [&str; 26] = [
-        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
-        "source", "track", "wbr", "p", "li", "dt", "dd", "tr", "td", "th", "option", "optgroup",
-        "thead", "tbody", "tfoot",
-    ];
-    const RAW_TEXT: [&str; 5] = ["script", "style", "textarea", "title", "xmp"];
-    let bytes = html.as_bytes();
-    let lower_eq = |a: &[u8], b: &str| a.eq_ignore_ascii_case(b.as_bytes());
-    let mut open: Vec<&[u8]> = Vec::new();
-    let mut i = 0;
-    while let Some(off) = bytes[i..].iter().position(|&b| b == b'<') {
-        i += off + 1;
-        if bytes[i..].starts_with(b"!--") {
-            i = find(bytes, i + 3, b"-->").map_or(bytes.len(), |e| e + 3);
-            continue;
+    let hash = KEY.with(|key| {
+        use std::hash::{BuildHasher, Hasher};
+        let mut h = key.build_hasher();
+        h.write(html.as_bytes());
+        h.finish()
+    });
+    if let Some(known) = LAST.with_borrow(|last| {
+        last.iter()
+            .find(|&&(h, len, _)| h == hash && len == html.len())
+            .map(|e| e.2)
+    }) {
+        return known;
+    }
+    let deep = depth_past(html, MAX_HTML_DEPTH);
+    LAST.with_borrow_mut(|last| {
+        if last.len() >= 4 {
+            last.remove(0);
         }
-        let close = bytes.get(i) == Some(&b'/');
-        let start = i + usize::from(close);
-        if !bytes.get(start).is_some_and(u8::is_ascii_alphabetic) {
-            continue;
+        last.push((hash, html.len(), deep));
+    });
+    deep
+}
+
+/// How much HTML [`depth_past`] hands the parser at a time.
+const DEPTH_CHUNK: usize = 16 << 10;
+
+/// Whether `html`, parsed as the HTML parser parses it, nests elements
+/// deeper than `limit` (`<html>` and `<body>` left out). The parser itself
+/// builds the tree, into [`DepthSink`], which keeps only who is whose
+/// parent, so every rule of the parser (elements it closes on its own, the
+/// adoption agency, foster parenting, SVG and MathML) is counted as it
+/// applies. It parses as html2text does (a document, scripting off); the
+/// sanitizer's fragment parse can only nest less (`<noscript>` is text
+/// there). The parser slows down with depth (its scope checks walk the open
+/// elements: 20 000 nested `<div>` take a second), so it gets the HTML
+/// [`DEPTH_CHUNK`] at a time and stops at the first chunk that goes past
+/// `limit`.
+fn depth_past(html: &str, limit: usize) -> bool {
+    use html5ever::tendril::TendrilSink;
+    let tree = Rc::new(RefCell::new(Tree::default()));
+    let document = tree.borrow_mut().add(0);
+    let sink = DepthSink {
+        tree: tree.clone(),
+        document: Rc::new(Node {
+            id: document,
+            name: html5ever::QualName::new(None, "".into(), "".into()),
+            contents: None,
+            html_point: false,
+        }),
+    };
+    let opts = html5ever::ParseOpts {
+        tree_builder: html5ever::tree_builder::TreeBuilderOpts {
+            scripting_enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut parser = html5ever::parse_document(sink, opts);
+    let mut rest = html;
+    while !rest.is_empty() {
+        let mut cut = rest.len().min(DEPTH_CHUNK);
+        while !rest.is_char_boundary(cut) {
+            cut -= 1;
         }
-        let end = bytes[start..]
-            .iter()
-            .position(|b| !b.is_ascii_alphanumeric() && *b != b'-')
-            .map_or(bytes.len(), |e| start + e);
-        let name = &bytes[start..end];
-        // The rest of the tag, to its `>` outside quotes.
-        let mut j = end;
-        let mut quote = None;
-        while j < bytes.len() {
-            match (quote, bytes[j]) {
-                (None, b'>') => break,
-                (None, q @ (b'"' | b'\'')) => quote = Some(q),
-                (Some(q), c) if c == q => quote = None,
-                _ => {}
-            }
-            j += 1;
+        parser.process(rest[..cut].into());
+        rest = &rest[cut..];
+        let mut tree = tree.borrow_mut();
+        if tree.stale {
+            tree.measure();
         }
-        i = j;
-        if UNCOUNTED.iter().any(|t| lower_eq(name, t)) {
-            continue;
-        }
-        if close {
-            if let Some(k) = open.iter().rposition(|n| n.eq_ignore_ascii_case(name)) {
-                open.truncate(k);
-            }
-            continue;
-        }
-        if let Some(raw) = RAW_TEXT.iter().find(|t| lower_eq(name, t)) {
-            // Its text runs to its own end tag.
-            let mut k = i;
-            i = loop {
-                match find(bytes, k, b"</") {
-                    Some(e)
-                        if bytes.len() >= e + 2 + raw.len()
-                            && lower_eq(&bytes[e + 2..e + 2 + raw.len()], raw) =>
-                    {
-                        break e;
-                    }
-                    Some(e) => k = e + 2,
-                    None => break bytes.len(),
-                }
-            };
-            continue;
-        }
-        open.push(name);
-        if open.len() > MAX_HTML_DEPTH {
+        // The document, `<html>` and `<body>` are the first three levels.
+        if tree.deepest > limit + 2 {
             return true;
         }
     }
     false
 }
 
-/// Where `needle` first is in `hay` from `from` on.
-fn find(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
-    hay.get(from..)?
-        .windows(needle.len())
-        .position(|w| w == needle)
-        .map(|p| from + p)
+/// A node [`DepthSink`] hands the parser: its place in [`Tree`], its name,
+/// a template's contents, and whether it is a MathML `<annotation-xml>`
+/// that holds HTML.
+struct Node {
+    id: usize,
+    name: html5ever::QualName,
+    contents: Option<Rc<Node>>,
+    html_point: bool,
+}
+
+/// The shape of a parsed document: each node's parent and children (in no
+/// order) and depth.
+#[derive(Default)]
+struct Tree {
+    parent: Vec<Option<usize>>,
+    children: Vec<Vec<usize>>,
+    /// Where each node is in its parent's `children`.
+    slot: Vec<usize>,
+    depth: Vec<usize>,
+    /// 1 for an element, 0 for what isn't one (a comment, a template's
+    /// contents).
+    level: Vec<usize>,
+    deepest: usize,
+    /// Whether a node that has children moved: the depths below it are out
+    /// of date until [`Tree::measure`].
+    stale: bool,
+}
+
+impl Tree {
+    fn add(&mut self, level: usize) -> usize {
+        self.level.push(level);
+        self.parent.push(None);
+        self.children.push(Vec::new());
+        self.slot.push(0);
+        self.depth.push(0);
+        self.parent.len() - 1
+    }
+
+    fn detach(&mut self, node: usize) {
+        if let Some(parent) = self.parent[node].take() {
+            let slot = self.slot[node];
+            self.children[parent].swap_remove(slot);
+            if let Some(&moved) = self.children[parent].get(slot) {
+                self.slot[moved] = slot;
+            }
+        }
+    }
+
+    fn attach(&mut self, parent: usize, node: usize) {
+        self.detach(node);
+        self.slot[node] = self.children[parent].len();
+        self.children[parent].push(node);
+        self.parent[node] = Some(parent);
+        self.depth[node] = self.depth[parent] + self.level[node];
+        self.deepest = self.deepest.max(self.depth[node]);
+        self.stale |= !self.children[node].is_empty();
+    }
+
+    /// Sets every depth from the document (node 0) down, without recursion.
+    fn measure(&mut self) {
+        let mut todo = vec![0];
+        while let Some(node) = todo.pop() {
+            for i in 0..self.children[node].len() {
+                let child = self.children[node][i];
+                self.depth[child] = self.depth[node] + self.level[child];
+                self.deepest = self.deepest.max(self.depth[child]);
+                todo.push(child);
+            }
+        }
+        self.stale = false;
+    }
+}
+
+/// The parser's tree, as [`Tree`] keeps it.
+struct DepthSink {
+    tree: Rc<RefCell<Tree>>,
+    document: Rc<Node>,
+}
+
+impl DepthSink {
+    fn node(&self, name: html5ever::QualName, level: usize) -> Rc<Node> {
+        let id = self.tree.borrow_mut().add(level);
+        Rc::new(Node {
+            id,
+            name,
+            contents: None,
+            html_point: false,
+        })
+    }
+}
+
+impl html5ever::interface::TreeSink for DepthSink {
+    type Handle = Rc<Node>;
+    type Output = ();
+    type ElemName<'a> = &'a html5ever::QualName;
+
+    fn finish(self) {}
+
+    fn parse_error(&self, _msg: Cow<'static, str>) {}
+
+    fn get_document(&self) -> Rc<Node> {
+        self.document.clone()
+    }
+
+    fn elem_name<'a>(&'a self, target: &'a Rc<Node>) -> &'a html5ever::QualName {
+        &target.name
+    }
+
+    fn create_element(
+        &self,
+        name: html5ever::QualName,
+        _attrs: Vec<html5ever::Attribute>,
+        flags: html5ever::interface::ElementFlags,
+    ) -> Rc<Node> {
+        let mut node = self.node(name.clone(), 1);
+        if let Some(n) = Rc::get_mut(&mut node) {
+            n.html_point = flags.mathml_annotation_xml_integration_point;
+        }
+        if flags.template {
+            let contents = self.node(name, 0);
+            self.tree.borrow_mut().attach(node.id, contents.id);
+            if let Some(n) = Rc::get_mut(&mut node) {
+                n.contents = Some(contents);
+            }
+        }
+        node
+    }
+
+    fn create_comment(&self, _text: html5ever::tendril::StrTendril) -> Rc<Node> {
+        self.node(self.document.name.clone(), 0)
+    }
+
+    fn create_pi(
+        &self,
+        _target: html5ever::tendril::StrTendril,
+        _data: html5ever::tendril::StrTendril,
+    ) -> Rc<Node> {
+        self.node(self.document.name.clone(), 0)
+    }
+
+    fn append(&self, parent: &Rc<Node>, child: html5ever::interface::NodeOrText<Rc<Node>>) {
+        if let html5ever::interface::NodeOrText::AppendNode(child) = child {
+            self.tree.borrow_mut().attach(parent.id, child.id);
+        }
+    }
+
+    fn append_based_on_parent_node(
+        &self,
+        element: &Rc<Node>,
+        prev_element: &Rc<Node>,
+        child: html5ever::interface::NodeOrText<Rc<Node>>,
+    ) {
+        if self.tree.borrow().parent[element.id].is_some() {
+            self.append_before_sibling(element, child);
+        } else {
+            self.append(prev_element, child);
+        }
+    }
+
+    fn append_doctype_to_document(
+        &self,
+        _name: html5ever::tendril::StrTendril,
+        _public_id: html5ever::tendril::StrTendril,
+        _system_id: html5ever::tendril::StrTendril,
+    ) {
+    }
+
+    fn get_template_contents(&self, target: &Rc<Node>) -> Rc<Node> {
+        target.contents.clone().unwrap_or_else(|| target.clone())
+    }
+
+    fn is_mathml_annotation_xml_integration_point(&self, handle: &Rc<Node>) -> bool {
+        handle.html_point
+    }
+
+    fn same_node(&self, x: &Rc<Node>, y: &Rc<Node>) -> bool {
+        x.id == y.id
+    }
+
+    fn set_quirks_mode(&self, _mode: html5ever::interface::QuirksMode) {}
+
+    fn append_before_sibling(
+        &self,
+        sibling: &Rc<Node>,
+        new_node: html5ever::interface::NodeOrText<Rc<Node>>,
+    ) {
+        if let html5ever::interface::NodeOrText::AppendNode(node) = new_node {
+            let mut tree = self.tree.borrow_mut();
+            if let Some(parent) = tree.parent[sibling.id] {
+                tree.attach(parent, node.id);
+            }
+        }
+    }
+
+    fn add_attrs_if_missing(&self, _target: &Rc<Node>, _attrs: Vec<html5ever::Attribute>) {}
+
+    fn remove_from_parent(&self, target: &Rc<Node>) {
+        self.tree.borrow_mut().detach(target.id);
+    }
+
+    fn reparent_children(&self, node: &Rc<Node>, new_parent: &Rc<Node>) {
+        let mut tree = self.tree.borrow_mut();
+        for child in std::mem::take(&mut tree.children[node.id]) {
+            tree.parent[child] = None;
+            tree.attach(new_parent.id, child);
+        }
+    }
 }
 
 /// The text of an HTML body too large or deep to parse: its tags removed,
@@ -856,6 +1068,34 @@ pub fn percent_encode(s: &str) -> String {
     out
 }
 
+/// Decodes `%XX` escapes (RFC 3986; a `+` stays a plus). A `%` not
+/// followed by two hex digits is kept as it is.
+pub fn percent_decode(s: &str) -> Vec<u8> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let pair = (b[i] == b'%')
+            .then(|| Some((hex_digit(*b.get(i + 1)?)?, hex_digit(*b.get(i + 2)?)?)))
+            .flatten();
+        match pair {
+            Some((h, l)) => {
+                out.push(h << 4 | l);
+                i += 3;
+            }
+            None => {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+pub(crate) fn hex_digit(b: u8) -> Option<u8> {
+    (b as char).to_digit(16).map(|d| d as u8)
+}
+
 pub fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -1409,5 +1649,115 @@ mod tests {
         let t = std::time::Instant::now();
         let _ = html_too_large(&"<a".repeat(1_000_000));
         assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn percent_escapes_are_decoded_and_round_trip() {
+        assert_eq!(percent_decode("a%40b%2Bc+d%zz%4"), b"a@b+c+d%zz%4");
+        assert_eq!(percent_decode("%C3%A9"), "\u{e9}".as_bytes());
+        let s = "x?y&z=1 \u{e9}";
+        assert_eq!(percent_decode(&percent_encode(s)), s.as_bytes());
+    }
+
+    /// How deep the HTML parser nests `html`'s elements, `<html>` and
+    /// `<body>` left out.
+    fn parsed_depth(html: &str) -> usize {
+        fn depth(h: &html2text::Handle) -> usize {
+            usize::from(matches!(h.data, html2text::Element { .. }))
+                + h.children.borrow().iter().map(depth).max().unwrap_or(0)
+        }
+        let dom = html2text::config::plain()
+            .parse_html(html.as_bytes())
+            .unwrap();
+        depth(&dom.document) - 2
+    }
+
+    #[test]
+    fn the_depth_of_a_body_is_measured_once() {
+        // Review of the security round: each body was parsed several times
+        // over to measure it (its text, its document in each theme).
+        let html = "<div>x</div>".repeat(200_000);
+        assert!(!html_too_large(&html));
+        let t = std::time::Instant::now();
+        for _ in 0..20 {
+            assert!(!html_too_large(&html));
+        }
+        assert!(
+            t.elapsed() < std::time::Duration::from_millis(500),
+            "{:?}",
+            t.elapsed()
+        );
+        let deep = "<div>".repeat(2000);
+        assert!(html_too_large(&deep) && html_too_large(&deep));
+    }
+
+    #[test]
+    fn the_depth_is_counted_as_the_parser_nests() {
+        // Review of the security round: elements the parser closes on its
+        // own and SVG's `<path/>` counted as open, so shallow mail was shown
+        // as text; and end tags out of scope, implied `<tbody>`s and the
+        // adoption agency made the scan count far less than the parser nests,
+        // so a deep mail still stalled it. The parser now counts.
+        let shallow = [
+            // At the limit with a comment and a template: neither is a level.
+            format!(
+                "{}<!--x--><template>x</template>",
+                "<div>".repeat(MAX_HTML_DEPTH - 1)
+            ),
+            "<a href=x>link ".repeat(1001),
+            format!("<svg>{}</svg>", "<path d=\"M0 0\"/>".repeat(5000)),
+            format!("<svg>{}</svg>", "<path d='M0 0' />".repeat(5000)),
+            "<svg/><math/>".repeat(2000),
+            "<button>b ".repeat(1001),
+            "<nobr>n ".repeat(1001),
+            "<h1>a<h2>b<h3>c</h1>".repeat(1001),
+            "<h1>a<h2>b".repeat(1001),
+            "<form><input>".repeat(1001),
+            "<table><caption>c<caption>d<colgroup><col><colgroup></table>".repeat(1001),
+            "<ruby>x<rt>a<rp>b<rt>c</ruby>".repeat(1001),
+            "<svg><g><div>x</div>".repeat(1001),
+            "<p><span>a<p><b>b".repeat(1001),
+            "<ul><li><span>a<li><i>b</ul>".repeat(1001),
+            "<dl><dt><span>a<dd><span>b</dl>".repeat(1001),
+            "<table><tr><td><font>a<td><font>b<tr><th><span>c</table>".repeat(1001),
+            "<table><tbody><tr><td>a<tbody><tr><td>b</table>".repeat(1001),
+            "<li><address><li>".repeat(600),
+            "<table><table>".repeat(600),
+            format!("<font>{}", "<svg><font color=red>".repeat(600)),
+        ];
+        for html in &shallow {
+            let real = parsed_depth(html);
+            assert!(!depth_past(html, real), "{}: {real}", &html[..40]);
+            assert!(!html_too_large(html), "{}", &html[..40]);
+        }
+        // Mail that does nest deeply is still caught, and the parser does
+        // nest it: shapes a cruder count missed (SVG and MathML elements
+        // named like HTML ones that close on their own or hold raw text, a
+        // `/` in an unquoted value, a quote in an attribute's name, MathML
+        // that holds HTML).
+        let deep = [
+            "<a><b x=1>".repeat(1001),
+            format!("<svg>{}", "<tr>".repeat(1001)),
+            format!("<svg>{}", "<style><g>".repeat(600)),
+            format!("<svg><title>{}", "<div>".repeat(1001)),
+            format!("<svg>{}", "<g d=a/>".repeat(1001)),
+            "<div x\">".repeat(1500),
+            "<math><annotation-xml encoding=text/html><div>".repeat(400),
+            format!("<math>{}", "<desc><div>".repeat(1001)),
+            "<p><object>".repeat(1001),
+            "<li><section>".repeat(600),
+            "<span><div></span>".repeat(1500),
+            "<li><ul></li>".repeat(1500),
+            "<form><div></form>".repeat(1500),
+            "<b><div></b>".repeat(1500),
+            "<table><tr><td>".repeat(300),
+            "<a><div>".repeat(1200),
+            "<div><table><tr><td><a>".repeat(400),
+            "<button><table><td><button>".repeat(400),
+        ];
+        for html in &deep {
+            assert!(html_too_large(html), "{}", &html[..40]);
+            assert!(parsed_depth(html) > MAX_HTML_DEPTH, "{}", &html[..40]);
+        }
     }
 }

@@ -82,7 +82,8 @@ preview on `gui-v*` tags; install steps are in the [main README](../README.md#de
   for the installed app.
 - **Tray icon (opt-in):** turned on in the settings. Its menu has Show tmpmail, New address
   (the first provider that works; the address is copied and a notification says so), Copy
-  code (the newest code of the last 15 minutes, across inboxes; greyed out otherwise) and
+  code (the newest code of the last 15 minutes, across inboxes, also from mail that was
+  already there when the app started; greyed out otherwise) and
   Quit. While it is on, closing the window hides it and mail is still checked; "Start
   hidden in the tray" skips the window at launch. Linux reports no clicks on the icon
   itself, so everything is in the menu (on Windows a click shows the window). Linux needs a

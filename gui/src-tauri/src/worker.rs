@@ -212,7 +212,14 @@ impl watcher::Front for Front {
             Ok(list) => {
                 // Codes are looked for in the sender's own words, as when
                 // the message is opened; only what the page shows is cleaned.
-                let arrived = self.arrivals.listed(&address, &list);
+                // A code in mail already there at the inbox's first listing
+                // (the app just started) counts for the tray too.
+                let (arrived, recent) =
+                    self.arrivals
+                        .listed_with_code(&address, &list, chrono::Utc::now());
+                if let Some((code, at)) = recent {
+                    tray::saw_code(&self.shared, &code, Some(at));
+                }
                 for a in &arrived {
                     if let Some(code) = &a.code {
                         tray::saw_code(&self.shared, code, a.date);

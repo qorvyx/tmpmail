@@ -71,9 +71,34 @@ pub struct Arrivals {
 }
 
 impl Arrivals {
-    /// The messages in `list` that weren't in the inbox's last listing.
-    /// An inbox's first listing only records what is already there.
+    /// [`Arrivals::listed_with_code`]'s new mail.
+    #[cfg(test)]
     pub fn listed(&mut self, address: &str, list: &[Summary]) -> Vec<Arrival> {
+        self.listed_with_code(address, list, chrono::Utc::now()).0
+    }
+
+    /// The messages in `list` that weren't in the inbox's last listing (an
+    /// inbox's first listing only records what is already there), and for
+    /// a first listing the newest code already in it ([`recent_code`]): the
+    /// tray's "Copy code" offers it right after a start, before new mail.
+    pub fn listed_with_code(
+        &mut self,
+        address: &str,
+        list: &[Summary],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> (
+        Vec<Arrival>,
+        Option<(String, chrono::DateTime<chrono::Utc>)>,
+    ) {
+        let first = !self.known.contains_key(address);
+        let arrived = self.listed_ids(address, list);
+        let code = first
+            .then(|| recent_code(list, now, crate::tray::CODE_FRESH))
+            .flatten();
+        (arrived, code)
+    }
+
+    fn listed_ids(&mut self, address: &str, list: &[Summary]) -> Vec<Arrival> {
         let ids: HashSet<String> = list.iter().map(|s| s.id.clone()).collect();
         let arrived = match self.known.get(address) {
             None => Vec::new(),
@@ -119,9 +144,35 @@ fn arrival(address: &str, s: &Summary) -> Arrival {
         id: s.id.clone(),
         sender: cap(&sender_name(&s.from), SENDER_MAX),
         subject: cap(&clean_line(&s.subject), SUBJECT_MAX),
-        code: extract::otp(&s.subject, &s.intro, None).map(|c| cap(&clean_line(&c), CODE_MAX)),
+        code: code_of(s),
         date: s.date,
     }
+}
+
+/// The newest code in an inbox's listing among mail of the last `fresh`
+/// before `now` (mail dated later than now, a skewed or lying sender's,
+/// doesn't count), with its mail's date. Codes are looked for in the
+/// subject and preview, as for notifications.
+pub fn recent_code(
+    list: &[Summary],
+    now: chrono::DateTime<chrono::Utc>,
+    fresh: std::time::Duration,
+) -> Option<(String, chrono::DateTime<chrono::Utc>)> {
+    let fresh = chrono::Duration::from_std(fresh).ok()?;
+    list.iter()
+        .filter_map(|s| {
+            let d = s.date?;
+            let age = now.signed_duration_since(d);
+            (age >= chrono::Duration::zero() && age < fresh)
+                .then(|| code_of(s).map(|c| (c, d)))
+                .flatten()
+        })
+        .max_by_key(|(_, d)| *d)
+}
+
+/// The code in a listed message's subject and preview, cleaned and capped.
+fn code_of(s: &Summary) -> Option<String> {
+    extract::otp(&s.subject, &s.intro, None).map(|c| cap(&clean_line(&c), CODE_MAX))
 }
 
 /// "GitHub" for `GitHub <noreply@github.com>`, else the address, cleaned.
@@ -594,6 +645,36 @@ mod tests {
         assert_eq!(a.sender, "Zoë Ünicode");
         assert_eq!(a.subject, "Café résumé ✓ =?utf-8?q?not_decoded_again?=");
         assert_eq!(a.code.as_deref(), Some("551177"));
+    }
+
+    #[test]
+    fn the_newest_recent_code_is_found_in_a_listing() {
+        let now = chrono::Utc::now();
+        let at = |mins: i64, subject: &str| {
+            let mut s = summary("x", "A <a@b.c>", subject, "");
+            s.date = Some(now - chrono::Duration::minutes(mins));
+            s
+        };
+        let fifteen = std::time::Duration::from_secs(15 * 60);
+        let code = |list: &[Summary]| recent_code(list, now, fifteen).map(|c| c.0);
+        // Round 2's case (N1): the code came 11 minutes before the start.
+        let list = [
+            at(20, "Your code is 111111"),
+            at(11, "Code 222222"),
+            at(12, "Your code is 333333"),
+        ];
+        assert_eq!(code(&list), Some("222222".into()));
+        assert_eq!(code(&[at(20, "Your code is 111111")]), None);
+        assert_eq!(code(&[at(1, "No code here")]), None);
+        // Mail dated in the future doesn't count.
+        assert_eq!(code(&[at(-60, "Your code is 444444")]), None);
+
+        // Only an inbox's first listing gives it.
+        let mut arrivals = Arrivals::default();
+        let (new, first) = arrivals.listed_with_code("a@x.com", &list, now);
+        assert!(new.is_empty());
+        assert_eq!(first.map(|c| c.0), Some("222222".into()));
+        assert_eq!(arrivals.listed_with_code("a@x.com", &list, now).1, None);
     }
 
     #[test]

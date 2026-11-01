@@ -123,7 +123,7 @@ pub struct NewArgs {
     pub domain: Option<String>,
 
     /// Use only this provider (no fallback)
-    #[arg(long, short)]
+    #[arg(long, short, value_parser = provider_ids())]
     pub provider: Option<String>,
 
     /// Label to find this inbox later (e.g. github)
@@ -301,6 +301,18 @@ pub struct WatchArgs {
     pub copy: bool,
 }
 
+/// The provider ids, so `-p` is checked and shells complete it.
+fn provider_ids() -> clap::builder::PossibleValuesParser {
+    clap::builder::PossibleValuesParser::new(crate::provider::all())
+}
+
+/// The ids of the providers `login` works with.
+fn login_provider_ids() -> clap::builder::PossibleValuesParser {
+    clap::builder::PossibleValuesParser::new(
+        crate::provider::all().filter(|id| crate::provider::get(id).is_ok_and(|p| p.caps().login)),
+    )
+}
+
 /// Parses `90`, `90s`, `30m`, `2h`, `1d` or combinations such as `1h30m`.
 pub fn parse_duration(s: &str) -> Result<std::time::Duration, String> {
     let bad = || format!("invalid duration {s:?}, use e.g. 90s, 30m or 2h");
@@ -371,7 +383,7 @@ pub struct DeleteArgs {
 #[derive(Debug, Args)]
 pub struct ProviderArg {
     /// Provider to ask (default: first in your provider order)
-    #[arg(long, short)]
+    #[arg(long, short, value_parser = provider_ids())]
     pub provider: Option<String>,
 }
 
@@ -392,7 +404,7 @@ pub struct LoginArgs {
     pub password: Option<String>,
 
     /// mailtm (default), mailgw or maildrop
-    #[arg(long, short)]
+    #[arg(long, short, value_parser = login_provider_ids())]
     pub provider: Option<String>,
 
     /// Label to find this inbox later (e.g. github)
@@ -512,7 +524,7 @@ pub fn usage_message(e: &clap::Error) -> String {
     let text = e.render().to_string();
     let what: Vec<&str> = text
         .lines()
-        .take_while(|l| !l.starts_with("Usage:"))
+        .take_while(|l| !l.starts_with("Usage:") && !l.starts_with("For more information"))
         .collect();
     let line = crate::render::clean_line(&what.join(" "));
     line.strip_prefix("error: ").unwrap_or(&line).to_string()
@@ -544,6 +556,11 @@ mod tests {
         let typo = message("--json wait --fro x");
         assert!(typo.contains("--from"), "{typo}");
         assert!(!typo.contains("Usage"), "{typo}");
+        let provider = message("--json new -p foo");
+        assert!(provider.contains("mailtm"), "{provider}");
+        assert!(!provider.contains("For more information"), "{provider}");
+        assert!(Cli::try_parse_from(args("login a@b.c -p guerrilla")).is_err());
+        assert!(Cli::try_parse_from(args("login a@b.c -p mailgw")).is_ok());
     }
 
     fn rw(s: &str) -> String {
@@ -607,6 +624,16 @@ mod tests {
             .unwrap();
         let page = String::from_utf8(out).unwrap();
         assert!(page.contains("tmpmail\\-watch(1)"), "{page}");
+    }
+
+    #[test]
+    fn bash_completes_provider_ids() {
+        use clap::CommandFactory;
+        let mut out = Vec::new();
+        clap_complete::generate(Shell::Bash, &mut Cli::command(), "tmpmail", &mut out);
+        let script = String::from_utf8(out).unwrap();
+        let ids = crate::provider::all().collect::<Vec<_>>().join(" ");
+        assert!(script.contains(&ids), "no provider list in the bash script");
     }
 
     #[test]

@@ -205,8 +205,8 @@ verification code, the preview shows it highlighted at the top and `y` copies it
 
 | Key | Action |
 |---|---|
-| `Tab`, `←` `→` (`h` `l`), `Enter` | Move between panes |
-| `↑` `↓` (`j` `k`), `g` `G` | Move in a list, or scroll the message |
+| `Tab` (`Shift+Tab` back), `←` `→` (`h` `l`), `Enter` | Move between panes |
+| `↑` `↓` (`j` `k`), `g` `G` (`Home` `End`) | Move in a list, or scroll the message (`G` stops at its last page) |
 | `PgUp` `PgDn`, `Space` | Scroll the message |
 | `n` | Create an inbox (with the same fallback as `new`) |
 | `N` | Pick a provider from a list and create an inbox there (no fallback, like `new -p`). Maildrop is marked `public` |
@@ -386,6 +386,10 @@ tmpmail completions bash > ~/.local/share/bash-completion/completions/tmpmail
 tmpmail completions zsh  > ~/.zfunc/_tmpmail
 tmpmail completions fish > ~/.config/fish/completions/tmpmail.fish
 ```
+
+They complete commands and options, and the provider ids after `-p` (`new`, `domains`,
+`login`, which offers only the providers it can log in to). An unknown id after `-p` is
+refused with the list of known ones (exit 64).
 
 ---
 

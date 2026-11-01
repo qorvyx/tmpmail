@@ -276,7 +276,9 @@ impl App {
         let (msg, id) = self.message_at(n, a.msg.id.as_deref())?;
         self.mark_read_noting(n, &id);
         if a.html {
-            return self.open_html(&msg, a.images);
+            let path = self.open_html(&msg, a.images)?;
+            self.note(&format!("opened {}", path.display()));
+            return Ok(());
         }
         if self.global.json {
             self.json_out(&msg);
@@ -375,7 +377,9 @@ impl App {
         out
     }
 
-    pub(crate) fn open_html(&self, msg: &Message, images: bool) -> Result<()> {
+    /// Writes the message's sanitized HTML to a private file, opens it in
+    /// the browser and returns the file's path.
+    pub(crate) fn open_html(&self, msg: &Message, images: bool) -> Result<std::path::PathBuf> {
         let html = match (&msg.html, &msg.text) {
             (Some(h), _) => h.clone(),
             (None, Some(t)) => format!("<pre>{}</pre>", crate::render::escape_html(t)),
@@ -385,8 +389,7 @@ impl App {
         let name = format!("{}.html", safe_filename(&msg.id, "message"));
         let path = system::write_view_file(self.store.dir(), &name, &doc)?;
         system::open(&path.to_string_lossy(), self.browser().as_deref())?;
-        self.note(&format!("opened {}", path.display()));
-        Ok(())
+        Ok(path)
     }
 
     // ----- wait / otp / links -----

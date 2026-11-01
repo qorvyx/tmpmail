@@ -269,9 +269,9 @@ struct Ui {
     /// The user went to the shown message before it loaded: mark it read
     /// once it has.
     read_on_load: bool,
-    /// The preview's text for (message id, width), since converting HTML
-    /// on every frame would be wasteful.
-    rendered: Option<(String, u16, Text<'static>)>,
+    /// The preview's text for (message id, width), and its height once
+    /// wrapped, since converting HTML on every frame would be wasteful.
+    rendered: Option<(String, u16, Text<'static>, usize)>,
     scroll: u16,
     focus: Focus,
     status: Option<(String, Instant)>,
@@ -684,8 +684,9 @@ impl Ui {
             },
             KeyCode::Char('o') => {
                 if let Some(msg) = self.message().cloned() {
-                    if let Err(e) = app.open_html(&msg, false) {
-                        self.say(format!("could not open the message: {e}"));
+                    match app.open_html(&msg, false) {
+                        Ok(_) => self.say("opened the message in the browser"),
+                        Err(e) => self.say(format!("could not open the message: {e}")),
                     }
                 }
             }
@@ -1001,37 +1002,39 @@ impl Ui {
     fn draw_preview(&mut self, f: &mut Frame, area: Rect) {
         let block = self.block("Message".into(), Focus::Preview);
         let inner = block.inner(area);
-        let text = match &self.preview {
-            Preview::None => Text::from(""),
-            Preview::Loading => Text::from("Loading...").dim(),
-            Preview::Failed(e) => {
-                Text::from(format!("Could not load this message: {}", clean_line(e))).fg(Color::Red)
-            }
+        let wrapped = |text: Text<'static>| Paragraph::new(text).wrap(Wrap { trim: false });
+        let (p, lines) = match &self.preview {
             Preview::Ready(msg) => {
                 let fresh = self
                     .rendered
                     .as_ref()
-                    .is_none_or(|(id, w, _)| *id != msg.id || *w != inner.width);
+                    .is_none_or(|(id, w, _, _)| *id != msg.id || *w != inner.width);
                 if fresh {
-                    self.rendered = Some((
-                        msg.id.clone(),
-                        inner.width,
-                        render_message(msg, inner.width),
-                    ));
+                    let text = render_message(msg, inner.width);
+                    let lines = wrapped(text.clone()).line_count(inner.width);
+                    self.rendered = Some((msg.id.clone(), inner.width, text, lines));
                 }
-                self.rendered
-                    .as_ref()
-                    .map(|(_, _, t)| t.clone())
-                    .unwrap_or_default()
+                let (_, _, text, lines) = self.rendered.as_ref().expect("just rendered");
+                (wrapped(text.clone()), *lines)
+            }
+            other => {
+                let text = match other {
+                    Preview::Loading => Text::from("Loading...").dim(),
+                    Preview::Failed(e) => {
+                        Text::from(format!("Could not load this message: {}", clean_line(e)))
+                            .fg(Color::Red)
+                    }
+                    _ => Text::from(""),
+                };
+                let p = wrapped(text);
+                let lines = p.line_count(inner.width);
+                (p, lines)
             }
         };
-        // Keep the scroll within the text (lines can wrap, so allow some slack).
-        let max = (text.lines.len() as u16).saturating_sub(inner.height / 2);
-        self.scroll = self.scroll.min(max);
-        let p = Paragraph::new(text)
-            .wrap(Wrap { trim: false })
-            .scroll((self.scroll, 0))
-            .block(block);
+        // Keep the scroll within the wrapped text: at most its last page.
+        let lines = u16::try_from(lines).unwrap_or(u16::MAX);
+        self.scroll = self.scroll.min(lines.saturating_sub(inner.height));
+        let p = p.scroll((self.scroll, 0)).block(block);
         f.render_widget(p, area);
     }
 
@@ -1082,9 +1085,11 @@ impl Ui {
         }
         f.render_widget(Line::from(spans), area);
         if let Some((msg, _)) = &self.status {
+            // Cut at the end, not the start, when it doesn't fit.
+            let room = (area.width as usize).saturating_sub(1);
             f.render_widget(
                 Line::from(Span::styled(
-                    format!("{} ", clean_line(msg)),
+                    format!("{} ", fit(&clean_line(msg), room)),
                     Style::new().fg(Color::Cyan),
                 ))
                 .right_aligned(),
@@ -1092,6 +1097,28 @@ impl Ui {
             );
         }
     }
+}
+
+/// `s` cut to `cells` terminal columns (wide characters take two), with
+/// an ellipsis when cut.
+fn fit(s: &str, cells: usize) -> String {
+    let width = |s: &str| Span::raw(s).width();
+    if width(s) <= cells {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    for c in s.chars() {
+        let mut next = out.clone();
+        next.push(c);
+        if width(&next) + 1 > cells {
+            break;
+        }
+        out = next;
+    }
+    if cells > 0 {
+        out.push('…');
+    }
+    out
 }
 
 /// The detected verification code, if the message has one.
@@ -1163,24 +1190,8 @@ fn render_message(msg: &Message, width: u16) -> Text<'static> {
 }
 
 fn draw_help(f: &mut Frame) {
-    const KEYS: &[(&str, &str)] = &[
-        ("Tab / ← →", "move between panes"),
-        ("↑ ↓ / j k", "move, or scroll the message"),
-        ("PgUp PgDn", "scroll the message"),
-        ("n", "create a new inbox"),
-        ("N", "create an inbox at a chosen provider"),
-        ("a", "make the selected inbox the active one"),
-        ("c", "copy the inbox address"),
-        ("D", "delete the inbox"),
-        ("y", "copy the verification code"),
-        ("L / O", "copy / open the first link"),
-        ("o", "open the message in the browser"),
-        ("d", "delete the message"),
-        ("r", "check the inbox now"),
-        ("q", "quit"),
-    ];
     let area = f.area();
-    let w = 54.min(area.width);
+    let w = 62.min(area.width);
     let h = (KEYS.len() as u16 + 2).min(area.height);
     let rect = Rect::new(
         area.x + (area.width - w) / 2,
@@ -1192,7 +1203,7 @@ fn draw_help(f: &mut Frame) {
         .iter()
         .map(|(k, what)| {
             Line::from(vec![
-                Span::styled(format!(" {k:<12}"), Style::new().bold()),
+                Span::styled(format!(" {k:<16}"), Style::new().bold()),
                 Span::raw(*what),
             ])
         })
@@ -1207,6 +1218,31 @@ fn draw_help(f: &mut Frame) {
         rect,
     );
 }
+
+/// What `?` shows: every key the TUI knows.
+const KEYS: &[(&str, &str)] = &[
+    ("Tab / ← → / h l", "move between panes (Shift+Tab: back)"),
+    ("Enter", "go to the pane on the right"),
+    ("Esc", "go back a pane; quit from the inboxes"),
+    ("↑ ↓ / j k", "move, or scroll the message"),
+    (
+        "g G / Home End",
+        "first / last, or top / end of the message",
+    ),
+    ("PgUp PgDn Space", "scroll the message"),
+    ("n", "create a new inbox"),
+    ("N", "create an inbox at a chosen provider"),
+    ("a", "make the selected inbox the active one"),
+    ("c", "copy the inbox address"),
+    ("D", "delete the inbox"),
+    ("y", "copy the verification code"),
+    ("L / O", "copy / open the first link"),
+    ("o", "open the message in the browser"),
+    ("d", "delete the message"),
+    ("r", "check the inbox now"),
+    ("?", "show these keys"),
+    ("q / Ctrl+C", "quit"),
+];
 
 /// The provider picker: one row per provider, with its lifetime, and a
 /// warning on those whose inboxes anyone can read.
@@ -1448,6 +1484,44 @@ mod tests {
                     .draw(|f| ui.draw(f))
                     .unwrap_or_else(|e| panic!("{w}x{h}: {e}"));
             }
+        }
+    }
+
+    #[test]
+    fn end_shows_the_last_page_of_a_wrapped_message() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let mut ui = busy_ui();
+        ui.focus = Focus::Preview;
+        ui.jump(true);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| ui.draw(f)).unwrap();
+        let screen: Vec<String> = (0..24)
+            .map(|y| {
+                (0..80)
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect()
+            })
+            .collect();
+        // The preview's last row of text is the message's last line, and
+        // the row above the bottom border isn't blank.
+        let bottom = screen[21].clone();
+        assert!(bottom.contains("482913"), "{screen:#?}");
+    }
+
+    #[test]
+    fn status_lines_are_cut_by_terminal_cells() {
+        assert_eq!(fit("short", 10), "short");
+        assert_eq!(fit("abcdefghij", 5), "abcd…");
+        // Each of these takes two columns.
+        assert_eq!(fit("日本語のテキスト", 7), "日本語…");
+    }
+
+    #[test]
+    fn the_help_lists_every_key() {
+        let keys: String = KEYS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(" ");
+        for k in ["g G", "Space", "Enter", "h l", "Esc", "Ctrl+C", "?"] {
+            assert!(keys.contains(k), "{k} missing from {keys}");
         }
     }
 

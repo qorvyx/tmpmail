@@ -109,17 +109,17 @@ jobs:
         run: |
           args=(--ci)
           [ -z "$TARGET" ] || args+=(--target "$TARGET")
-          pnpm tauri build "${args[@]}" --bundles "$BUNDLES"
+          pnpm tauri build "${args[@]}" --bundles "$BUNDLES" -- --locked
           # macOS: the .app above, then the DMG on its own (nothing is
           # compiled again). hdiutil fails now and then on runners with
           # "Resource busy", so a failed DMG is tried once more.
           if [ "$RUNNER_OS" = macOS ]; then
             dmg="../target/$TARGET/release/bundle/dmg"
-            if ! pnpm tauri build "${args[@]}" --bundles dmg; then
+            if ! pnpm tauri build "${args[@]}" --bundles dmg -- --locked; then
               echo "::warning::DMG creation failed; retrying once"
               rm -f "$dmg"/*.dmg
               sleep 15
-              pnpm tauri build "${args[@]}" --bundles dmg
+              pnpm tauri build "${args[@]}" --bundles dmg -- --locked
             fi
           fi
       - name: Collect the installers

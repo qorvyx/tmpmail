@@ -28,7 +28,7 @@ mail.tm's push stream. Recorded with [vhs](https://github.com/charmbracelet/vhs)
 ## Install
 
 ```sh
-cargo install tmpmail
+cargo install --locked tmpmail
 ```
 
 With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), `cargo binstall tmpmail`
@@ -95,9 +95,12 @@ one that has arrived. In GitHub Actions:
 ```yaml
 - name: Install tmpmail
   run: |
-    mkdir -p ~/.local/bin
-    curl -sSfL https://github.com/qorvyx/tmpmail/releases/download/v0.3.4/tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz \
-      | tar xz --strip-components=1 -C ~/.local/bin tmpmail-0.3.4-x86_64-unknown-linux-musl/tmpmail
+    mkdir -p ~/.local/bin && cd "$RUNNER_TEMP"
+    curl -sSfL -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.4/tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz \
+      -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.4/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz --strip-components=1 \
+      -C ~/.local/bin tmpmail-0.3.4-x86_64-unknown-linux-musl/tmpmail
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 - name: Sign-up test
@@ -493,6 +496,7 @@ config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
   copies there are ever deleted.
 - Attachment names are sanitized so they can't escape the target directory, and
   existing files are never overwritten (nor written through a link put in their place);
+  on Windows and macOS saved files are marked as downloaded from the internet;
   Windows device names such as `CON` get a `_` in front, and a leading `-` becomes `_`.
 - `tmpmail mcp` hands message contents to an AI agent. Anyone can mail a temp address, so
   treat what the agent reads there as untrusted input.

@@ -47,11 +47,11 @@ jobs:
           pnpm check
           pnpm lint
           pnpm build
-      - run: cargo clippy -p tmpmail-gui --all-targets -- -D warnings
-      - run: cargo test -p tmpmail-gui
+      - run: cargo clippy --locked -p tmpmail-gui --all-targets -- -D warnings
+      - run: cargo test --locked -p tmpmail-gui
       - name: Build the app (debug, with the probe)
         working-directory: gui
-        run: pnpm tauri build --debug --no-bundle
+        run: pnpm tauri build --debug --no-bundle -- --locked
       # The report goes to its own file: GLib prints some messages to stdout,
       # so stdout and stderr both go to probe.log.
       - name: Run the preview probe

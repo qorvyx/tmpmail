@@ -657,7 +657,7 @@ mod tests {
         };
         let fifteen = std::time::Duration::from_secs(15 * 60);
         let code = |list: &[Summary]| recent_code(list, now, fifteen).map(|c| c.0);
-        // Round 2's case (N1): the code came 11 minutes before the start.
+        // The code came 11 minutes before the start.
         let list = [
             at(20, "Your code is 111111"),
             at(11, "Code 222222"),

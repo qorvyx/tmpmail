@@ -1219,7 +1219,7 @@ mod tests {
 
     #[test]
     fn strips_bidi_and_invisible_format_characters() {
-        // The hostile sender of campaign round 2 (B1): the override would
+        // A hostile sender: the override would
         // turn the rest of a list row around.
         assert_eq!(
             clean_line("\"<b>Evil</b> & Co \u{202e}boN\" <evil@x.com>"),

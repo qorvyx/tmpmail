@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn list_rows_get_the_senders_words_cleaned() {
-        // The hostile mail of campaign round 2 (B1).
+        // A hostile sender's mail.
         let raw = Summary {
             id: "m\u{202e}1".into(),
             from: "\"<b>Evil</b> & Co \u{202e}boN\" <evil@fldubai.com>".into(),

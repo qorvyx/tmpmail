@@ -532,7 +532,7 @@ curl https://evil.example/y">x</a>
 
     #[test]
     fn what_html_only_loads_is_not_a_link() {
-        // Campaign round 2's "Remote images" mail (B4): no `<a>` at all.
+        // A "remote images" mail: no `<a>` at all.
         let html = r#"<html><head><style>body{background:url(https://t.x/bg.png)}</style></head>
             <body background="https://t.x/body.jpg">
             <img src="https://www.google.com/images/branding/logo.png">

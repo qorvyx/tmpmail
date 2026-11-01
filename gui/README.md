@@ -65,7 +65,7 @@ preview on `gui-v*` tags; install steps are in the [main README](../README.md#de
   once; without one (an older server) the window is raised as before. The `default`
   action (a click on the notification) is labeled "Open", for servers that list actions
   (such as dunst's menu; not tested). KDE's notification history shows it as a button with
-  Plasma's own label, "View" (seen on Plasma 6.6), and a click on a history entry's text
+  Plasma's own label, "View", and a click on a history entry's text
   does nothing there, so use that button; GNOME doesn't show it. The notifications are sent as `tmpmail`, with the `desktop-entry` hint `tmpmail` (the installed
   `tmpmail.desktop`), so KDE and GNOME label them "tmpmail" with its icon and file them
   under the app's own notification settings (0.1.1 sent the binary's name, `tmpmail-gui`;
@@ -228,8 +228,7 @@ rm -r squashfs-root
 Started with `--appimage-extract-and-run` (or with `APPIMAGE_EXTRACT_AND_RUN=1` in the
 environment, which does the same), the AppImage isn't mounted: its runtime unpacks it into
 `appimage_extracted_<hash>` in the temporary folder (`$TMPDIR`, else `/tmp`) and runs it
-from there. That is the AppImage runtime's doing, not the app's, and on Arch and Fedora
-(round 2) the folder was still there after the app quit normally; the runtime reuses it on
+from there. That is the AppImage runtime's doing, not the app's, and the folder can still be there after the app quit normally; the runtime reuses it on
 the next start of the same AppImage. It is about the AppImage's size and holds nothing of
 yours. Delete it once tmpmail has quit, and only tmpmail's (other AppImages started this
 way have folders named the same way): `ls -d /tmp/appimage_extracted_*/usr/bin/tmpmail-gui`
@@ -521,8 +520,7 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    (parsed, so an ASCII string: punycode hosts, escaped paths); the domain picker shows
    only names that look like domains; and an address a provider hands out is refused when
    it isn't one (`checked_address`), so inbox addresses are clean too. A right-to-left
-   override in a sender can't turn a row around to show another address (campaign round
-   2, B1). Codes are still looked for in the sender's own text, as the CLI does. The mail
+   override in a sender can't turn a row around to show another address. Codes are still looked for in the sender's own text, as the CLI does. The mail
    body in the frame is shown as sent (sanitized HTML; right-to-left text needs its
    marks).
 10. Notifications on Linux: the body is escaped when the server reads markup, and the

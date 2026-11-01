@@ -1543,7 +1543,7 @@ mod tests {
         app
     }
 
-    /// mail.tm as round 2 met it: the inline image is listed by its file
+    /// mail.tm's way: the inline image is listed by its file
     /// name, its `Content-ID` is only in the raw source.
     struct MailTmLike;
 

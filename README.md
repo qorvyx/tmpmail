@@ -2,9 +2,9 @@
 
 # tmpmail
 
-Disposable email for scripts, tests and AI agents. Make an address, sign up with it, and
-get the verification code back in one line of shell. When one provider is down, tmpmail
-[moves on to the next](#choose-the-provider).
+**Throwaway email addresses from your terminal.** Make an address, use it to sign up
+somewhere, and get the verification code back, in one line of shell. Made for scripts,
+tests, CI and AI agents, with a terminal UI and a desktop app for everyone else.
 
 [![CI](https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml/badge.svg)](https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml)
 [![Providers](https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml/badge.svg)](https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml)
@@ -15,69 +15,244 @@ get the verification code back in one line of shell. When one provider is down, 
 ```sh
 addr=$(tmpmail new -q)                   # quickfox605@maxxspace.com
 ./signup.sh "$addr"                      # anything that sends a mail to it
-tmpmail otp --wait --include-existing    # blocks until it arrives, then prints 482913
+tmpmail otp --wait --include-existing    # waits for the mail, then prints 482913
 ```
 
 ![tmpmail creating an address, waiting for a mail and printing its code and link](assets/demo.gif)
 
-<sub>A real mail, sent to the new address by
-[`assets/demo/send-test-mail.py`](assets/demo/send-test-mail.py) and delivered over
-mail.tm's push stream. Recorded with [vhs](https://github.com/charmbracelet/vhs) from
-[`assets/demo/demo.tape`](assets/demo/demo.tape).</sub>
+It uses free public mail services (mail.tm, DropMail, Guerrilla Mail and
+[others](#providers)). If one is down, tmpmail uses the next one.
+
+**Contents:** [Install](#install) · [Quick start](#quick-start) ·
+[Desktop app](#desktop-app-preview) · [Guide](#guide) · [Scripts and CI](#in-a-script-or-ci) ·
+[AI agents](#with-an-ai-agent) · [Providers](#providers) · [Reference](#reference) ·
+[Privacy and security](#privacy-and-security)
 
 ## Install
 
+tmpmail works on Linux (Fedora, Debian, Ubuntu, Arch and others), macOS and Windows. It is
+one file with nothing else to install.
+
+| System | How to install |
+|---|---|
+| **Linux** | `brew install qorvyx/tap/tmpmail`, `cargo install --locked tmpmail`, or the download below |
+| **macOS** | `brew install qorvyx/tap/tmpmail` or `cargo install --locked tmpmail` |
+| **Windows** | `cargo install --locked tmpmail`, or download the `.zip` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest), unzip it, and put `tmpmail.exe` in a folder on your `PATH` |
+
+With Homebrew, use the full name `qorvyx/tap/tmpmail`: Homebrew's own `tmpmail` is a
+different program. With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall),
+`cargo binstall tmpmail` downloads the ready-made program instead of compiling it.
+
+**Download on Linux** (x86_64; for ARM use `aarch64` in place of `x86_64`):
+
 ```sh
-cargo install --locked tmpmail
+curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.4/tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz
+tar xzf tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz
+install tmpmail-0.3.4-x86_64-unknown-linux-musl/tmpmail ~/.local/bin/
 ```
 
-With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), `cargo binstall tmpmail`
-downloads the prebuilt binary instead of compiling. On macOS or Linux with Homebrew:
+<details>
+<summary>Check a download</summary>
 
-```sh
-brew install qorvyx/tap/tmpmail
-```
-
-Use the full name: Homebrew's own `tmpmail` is a different project.
-
-Or take a prebuilt binary from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest):
-Linux (x86_64, aarch64, fully static), macOS (Intel, Apple silicon) and Windows (x64, C
-runtime linked in, so no Visual C++ Redistributable needed since 0.3.1). Each release has
-`SHA256SUMS`, and every file carries a GitHub build attestation that proves it was built
-from this repository by the release workflow:
+Each release has a `SHA256SUMS` file, and every file has a GitHub build attestation proving
+it was built from this repository:
 
 ```sh
 gh attestation verify tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
   --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml
 ```
 
-`--signer-workflow` checks that the CLI's release workflow made it (the desktop app's files
-are attested by `gui-release.yml`).
+</details>
 
-Nothing else is needed at runtime. Optional extras: `wl-copy`, `xclip`, `xsel` or `pbcopy`
-for `copy` (Windows has `clip.exe`), a browser for `read --html` (found through `xdg-open`,
-`open`, or Explorer on Windows), `notify-send` for `watch --notify` (macOS uses `osascript`,
-Windows a PowerShell toast), and `less` for long messages (without it, Windows prints them).
-Colors work in the classic `cmd.exe` console too (Windows 10 and later). CI runs the tests on Linux, macOS and Windows.
+**Optional:** a few commands use tools you probably have already. `copy` uses `wl-copy`,
+`xclip` or `xsel` on Linux (`pbcopy` on macOS, `clip.exe` on Windows); `read --html` opens your
+browser; `watch --notify` uses `notify-send` on Linux; long messages open in `less`.
 
-**Works on** Linux (Fedora, Debian, Ubuntu, Arch and others), macOS and Windows:
+## Quick start
 
-- **Linux:** `cargo install --locked tmpmail`, `brew install qorvyx/tap/tmpmail`, or the static
-  binary from the releases page (`tar xzf` it and put `tmpmail` on your `PATH`).
-- **macOS:** `brew install qorvyx/tap/tmpmail`, `cargo install --locked tmpmail`, or the
-  binary from the releases page.
-- **Windows:** `cargo install --locked tmpmail`, or unzip the release's `.zip` and put
-  `tmpmail.exe` on your `PATH`.
+```sh
+tmpmail new            # make an address
+tmpmail                # list the mail that arrived
+tmpmail read 1         # read the newest message
+tmpmail otp --wait     # wait for a mail with a code and print the code
+tmpmail tui            # or browse everything in a full-screen view
+```
 
-Rather have a window? The [desktop app](#desktop-app-preview) is in preview.
+The address you made last is the *active* one; every command uses it unless you
+[pick another](#several-inboxes).
 
-## Use it
+![The tmpmail TUI receiving a mail live and copying its code](assets/tui.gif)
+
+In the full-screen view (`tmpmail tui`), mail shows up as it arrives, the code is
+highlighted, and `y` copies it. Press `?` for the keys.
+
+## Desktop app (preview)
+
+Rather have a window? The desktop app does the same with the same inboxes: it shows your
+mail live, puts the code in a big banner with a Copy button, shows HTML mail safely (light
+or dark), saves attachments, notifies you of new mail, and can stay in the tray.
+[More about the app](gui/README.md).
+
+![The tmpmail desktop app showing a verification code in a banner above the mail](assets/desktop.png)
+
+It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS and on Windows. Download
+it from the [releases page](https://github.com/qorvyx/tmpmail/releases) (the `gui-v*`
+releases):
+
+| System | File | How to install |
+|---|---|---|
+| **Windows 10/11** | `tmpmail-desktop-VERSION-x64-setup.exe` | Run it. When Windows says "Windows protected your PC", click **More info**, then **Run anyway**. |
+| **macOS 10.15+** | `tmpmail-desktop-VERSION-universal.dmg` | Open it and drag tmpmail to Applications. Open tmpmail once (macOS refuses), then go to System Settings → Privacy & Security and click **Open Anyway**. |
+| **Debian, Ubuntu** | `tmpmail-desktop-VERSION-amd64.deb` | `sudo apt install ./tmpmail-desktop-VERSION-amd64.deb` |
+| **Fedora** and other RPM systems | `tmpmail-desktop-VERSION-x86_64.rpm` | `sudo dnf install ./tmpmail-desktop-VERSION-x86_64.rpm` |
+| **Other Linux** (Arch and others) | `tmpmail-desktop-VERSION-x86_64.AppImage` | `chmod +x` the file and run it. |
+
+<details>
+<summary>Why the warnings, and other details</summary>
+
+- The app isn't signed with a paid certificate, so Windows and macOS warn once.
+  - On Windows, the installer installs for your user only (no admin prompt) and fetches
+    WebView2 if it's missing. **Smart App Control** blocks unsigned apps completely; it can
+    only be turned off as a whole.
+  - On macOS 15 and later, Control-click → Open no longer skips the warning. From a
+    terminal, `xattr -dr com.apple.quarantine /Applications/tmpmail.app` does the same as
+    **Open Anyway**.
+- The AppImage may need `libfuse2`. Without FUSE, run it with `--appimage-extract-and-run`
+  ([details](gui/README.md#without-fuse---appimage-extract-and-run)). It adds no menu entry
+  by itself; AppImageLauncher or Gear Lever add one ([or by hand](gui/README.md#the-appimage)).
+- On NVIDIA, if the window stays blank, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+- Uninstalling keeps your settings and inboxes, since the command-line tool shares them.
+  [How to remove everything](gui/README.md#removing-it).
+- If you use the command-line tool too, use version 0.3.0 or later.
+- Each release has `SHA256SUMS` and build attestations
+  (`gh attestation verify FILE --repo qorvyx/tmpmail --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`).
+- To run it from source (Rust 1.90+, Node 24, pnpm): `cd gui && pnpm install && pnpm tauri dev`.
+
+</details>
+
+## Guide
+
+Each part is a short explanation and the commands for it. Not every service supports every
+feature; the [provider table](#providers) shows which do.
+
+### Create an address
+
+```sh
+tmpmail new              # a random, readable address, e.g. quickfox605@maxxspace.com
+tmpmail new -c           # the same, and copy it to the clipboard
+tmpmail whoami           # show it again later
+```
+
+### Choose the username or the domain
+
+```sh
+tmpmail new -u otter42                 # your own name before the @
+tmpmail new otter42@maxxspace.com      # or the whole address
+tmpmail domains                        # the domains on offer
+tmpmail domains -p dropmail            # DropMail's (about 20)
+tmpmail new -d yomail.info             # an address on that domain
+```
+
+If a site refuses one disposable domain, try another. Your own username works on mail.tm,
+mail.gw, Guerrilla Mail and Maildrop.
+
+### Choose the provider
+
+`tmpmail new` tries the services in this order and uses the first one that works:
+`mailtm, dropmail, guerrilla, tempmail_lol, mailgw`. To pick one, or change the order:
+
+```sh
+tmpmail new -p guerrilla               # only Guerrilla Mail
+tmpmail providers --check              # which ones are up right now
+TMPMAIL_PROVIDER=dropmail,mailtm tmpmail new
+```
+
+The order can also be set in the [config file](#configuration). Maildrop is never picked
+unless you ask for it (`-p maildrop`), because its inboxes are public.
+
+### Read your mail
+
+```sh
+tmpmail                  # list messages, newest first (same as tmpmail ls)
+tmpmail read 1           # read the newest; long ones open in a pager
+tmpmail read 1 --html    # the HTML version in your browser, made safe, no remote images
+```
+
+A message can be named by its number in the list or by its id (or the start of it). With
+no number, commands use the newest message.
+
+### Wait for a code or link
+
+```sh
+tmpmail otp --wait                    # wait for a new mail with a code, print the code
+tmpmail wait --link --from github     # wait for a mail from GitHub, print its best link
+tmpmail otp 1                         # the code in a message you already have
+tmpmail links 1                       # every link in it, verification links first
+```
+
+Waiting stops after 180 seconds (change it with `-t`) and exits with code 2. It only counts
+mail that arrives after you start; add `--include-existing` if the mail may already be
+there. `--from`, `--subject` and `--body` pick the right mail.
+
+With mail.tm and DropMail, new mail shows up within about a second (the service tells
+tmpmail right away). The others are checked every 5 seconds.
+
+### Attachments
+
+```sh
+tmpmail attachments 1                 # list them
+tmpmail save 1 -o ~/Downloads         # download all of them
+tmpmail save 1 invoice.pdf            # or just one
+```
+
+Existing files are never overwritten.
+
+### Several inboxes
+
+Give inboxes labels and switch between them:
+
+```sh
+tmpmail new -l github
+tmpmail new -l shop
+tmpmail inboxes                       # all of them; * marks the active one
+tmpmail -i github ls                  # one command on another inbox
+tmpmail use shop                      # make it the active one
+tmpmail ls -a                         # mail in every inbox
+tmpmail otp --wait -a                 # a code arriving at any of them
+```
+
+Each label belongs to one inbox. Inboxes can also be named by address or by the part
+before `@`.
+
+### Log back in
+
+mail.tm and mail.gw inboxes are real accounts that last until you delete them. Set a
+password to use one on their website too, or log in to one you made there:
+
+```sh
+tmpmail new -p mailtm --password 'correct horse'
+tmpmail login otter42@maxxspace.com --password 'correct horse'
+```
+
+DropMail and Guerrilla Mail come back to the same address by themselves (mail from an expired
+session is gone). Maildrop inboxes are public, so `tmpmail login name@maildrop.cc` needs no
+password.
+
+### Clean up
+
+```sh
+tmpmail delete 1                      # delete one message
+tmpmail delete --all                  # every message in the inbox
+tmpmail drop                          # delete the inbox and forget it
+tmpmail rotate                        # swap the active address for a fresh one
+tmpmail watch --rotate 30m            # a fresh address every 30 minutes
+tmpmail inboxes --prune               # forget inboxes that have expired
+```
 
 ### In a script or CI
 
-`wait` blocks until a matching mail arrives. `otp` prints just the code and `links` just
-the links, verification links first. Every command takes `--json`, and exit codes tell a
-timeout (2) apart from a dead provider (3).
+Every command takes `--json`, and the exit code tells a timeout (2) from a service that is
+down (3):
 
 ```sh
 addr=$(tmpmail new -q)
@@ -87,10 +262,10 @@ link=$(tmpmail wait --link --include-existing --subject 'confirm')
 tmpmail --json ls | jq -r '.messages[0].subject'
 ```
 
-`--include-existing` matters when the mail can arrive before `wait` starts. Without it,
-`wait` only accepts mail that is new since the call. With it, the newest matching mail
-already there when `wait` starts wins, so a code from an earlier try doesn't beat a resent
-one that has arrived. In GitHub Actions:
+Use `--include-existing` when the mail might arrive before `wait` starts. Then the newest
+matching mail wins, so an old code doesn't beat a resent one.
+
+In GitHub Actions:
 
 ```yaml
 - name: Install tmpmail
@@ -111,258 +286,33 @@ one that has arrived. In GitHub Actions:
     curl -sSf https://staging.example.com/verify -d "email=$addr" -d "code=$code"
 ```
 
-The [daily provider check](.github/workflows/providers.yml) creates and lists inboxes from
-GitHub's Linux, macOS and Windows runners, so the free providers are known to work from CI.
-Its badge turns red only when every provider is down from one of them.
+A [daily check](.github/workflows/providers.yml) makes sure the services work from GitHub's
+Linux, macOS and Windows runners.
 
 ### With an AI agent
 
-`tmpmail mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server. An agent
-can create an inbox, sign up somewhere and fetch the code without you:
+`tmpmail mcp` is an [MCP](https://modelcontextprotocol.io) server, so an AI agent can make
+an inbox, sign up somewhere and read the code by itself:
 
 ```sh
 claude mcp add tmpmail -- tmpmail mcp
 ```
 
-Other clients take `{ "command": "tmpmail", "args": ["mcp"] }`. The tools are
-`create_inbox`, `list_inboxes`, `list_messages`, `read_message`, `wait_for_message`,
-`get_verification_code`, `get_links`, `delete_message` and `delete_inbox`. Waits run in
-parallel and can be cancelled. Anyone can mail a temp address, so treat what the agent reads
-there as untrusted input: the server strips invisible and control characters (hidden text
-included) from what it hands over, cuts long fields, and marks mail results
-`untrusted_content`. [Details](docs/usage.md#mcp-server-for-ai-agents).
-
-### In the terminal
-
-`tmpmail tui` shows your inboxes, their mail and a preview, updated as mail arrives. A
-verification code is highlighted, and `y` copies it.
-
-![The tmpmail TUI receiving a mail live and copying its code](assets/tui.gif)
-
-The [guide](#guide) below shows each feature in a few lines, and [all commands](#commands)
-are listed under Reference.
-
-### Desktop app (preview)
-
-For people who'd rather not live in a terminal, tmpmail also comes as a desktop app for
-Linux, macOS and Windows, on the same inboxes and `config.toml` as the CLI. It shows your
-inboxes and their mail live, puts the verification code in a big banner with a Copy button,
-lists the verification link first, previews HTML mail safely (light or dark), saves
-attachments (or drags them out on Linux and macOS), and creates and deletes inboxes and
-messages, with the TUI's keyboard shortcuts. It notifies you of new mail (with the code, if
-there is one) while it's in the background, and a click on the notification opens it (on
-Windows from the notification center too), can sit in the tray and keep checking with the
-window closed, and has a settings screen. [More](gui/README.md).
-
-![The tmpmail desktop app showing a verification code in a banner above the mail](assets/desktop.png)
-
-<sub>Sample mail.</sub>
-
-It is a **preview**. It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS and
-on Windows. Downloads are on the
-[releases page](https://github.com/qorvyx/tmpmail/releases), under the `gui-v*` releases
-(`https://github.com/qorvyx/tmpmail/releases/download/gui-vVERSION/FILE`), each with
-`SHA256SUMS` and a build attestation (`gh attestation verify FILE --repo qorvyx/tmpmail
---signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`):
-
-| System | File |
-|---|---|
-| Windows 10/11 (x64) | `tmpmail-desktop-VERSION-x64-setup.exe` |
-| macOS 10.15+ (Apple silicon and Intel) | `tmpmail-desktop-VERSION-universal.dmg` |
-| Debian, Ubuntu (x86_64) | `tmpmail-desktop-VERSION-amd64.deb` |
-| Fedora and other RPM-based (x86_64) | `tmpmail-desktop-VERSION-x86_64.rpm` |
-| Other Linux (x86_64) | `tmpmail-desktop-VERSION-x86_64.AppImage` |
-
-The app isn't signed with a paid certificate, so each system warns once:
-
-- **macOS:** open the DMG and drag tmpmail to Applications. Open it once; macOS refuses.
-  Then go to System Settings → Privacy & Security, click **Open Anyway** next to the
-  message about tmpmail, and enter your password. On macOS 15 (Sequoia) and later,
-  Control-click → Open no longer skips this. If you trust the download,
-  `xattr -dr com.apple.quarantine /Applications/tmpmail.app` does the same from a terminal.
-- **Windows:** SmartScreen says "Windows protected your PC": click **More info**, then
-  **Run anyway**. The installer installs for your user only (no admin prompt) and fetches
-  WebView2 if it's missing. **Smart App Control blocks it outright**, with no way past for
-  one app; it can only be turned off as a whole.
-- **Linux:** `sudo apt install ./tmpmail-desktop-VERSION-amd64.deb` or `sudo dnf install
-  ./tmpmail-desktop-VERSION-x86_64.rpm` (both pull in WebKitGTK 4.1), or `chmod +x` the
-  AppImage and run it (it may need `libfuse2`; without FUSE, add
-  `--appimage-extract-and-run`, which leaves an unpacked copy in `/tmp`:
-  [see](gui/README.md#without-fuse---appimage-extract-and-run)). The AppImage installs no
-  menu entry, so on Wayland its window shows a generic icon until it is integrated
-  (AppImageLauncher, Gear Lever, or [by hand](gui/README.md#the-appimage)). Uninstalling
-  keeps your config and inboxes (the CLI shares them); [what to delete for a full
-  removal](gui/README.md#removing-it). On NVIDIA, if the window stays blank, start it with
-  `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
-
-If you use the CLI too, use **tmpmail 0.3.0 or later**: the app's settings screen can write
-the `http_timeout` key, which 0.2.0 refuses (0.3.0 and later warn about keys they don't
-know). To run the app from source instead, with Rust 1.90+, Node 24 and pnpm:
-
-```sh
-cd gui && pnpm install && pnpm tauri dev
-```
+Other clients take `{ "command": "tmpmail", "args": ["mcp"] }`. Anyone can send mail to a
+throwaway address, so the agent should treat that mail as untrusted: tmpmail removes hidden
+characters, shortens very long fields and marks mail as `untrusted_content`.
+[Tools and details](docs/usage.md#mcp-server-for-ai-agents).
 
 ### Coming from the original tmpmail
 
-[sdushantha/tmpmail](https://github.com/sdushantha/tmpmail) was a shell script on a single
-backend, 1secmail, which has shut down. This is a rewrite in Rust, and the old interface
-still works: `tmpmail -g [ADDR]`, `tmpmail`, `tmpmail -r`, `tmpmail ID`, `-d`, `-c`, `-t`.
-It no longer needs `w3m`, `curl` or `jq`.
-[Mapping of the old flags](docs/usage.md#original-tmpmail-flags).
-
-## Guide
-
-Each part is a plain explanation and the commands for it. The [provider table](#providers)
-shows which services support what.
-
-### Create an address
-
-```sh
-tmpmail new              # random, readable address, e.g. quickfox605@maxxspace.com
-tmpmail new -c           # same, and copy it to the clipboard (a failed copy only warns)
-tmpmail whoami           # show it again later
-```
-
-The new address becomes the *active* inbox: every other command uses it unless you say
-otherwise (see [several inboxes](#several-inboxes)).
-
-### Choose the username
-
-The part before `@` is random by default. Pick your own with `-u`, or give the whole
-address:
-
-```sh
-tmpmail new -u otter42
-tmpmail new otter42@maxxspace.com
-```
-
-Works on mail.tm, mail.gw, Guerrilla Mail and Maildrop; `tmpmail new` skips the providers
-that can't do it.
-
-### Pick a domain
-
-The part after `@`. List the domains a provider offers, then ask for one:
-
-```sh
-tmpmail domains                  # mail.tm's domains
-tmpmail domains -p dropmail      # DropMail's (about 20 of them)
-tmpmail new -d yomail.info       # tmpmail finds the provider that has it
-```
-
-Useful when a site blocks one disposable domain: try another. Works on mail.tm, mail.gw,
-DropMail and Guerrilla Mail. For `maildrop.cc`, say `-p maildrop`: Maildrop is public, so it
-is never picked on its own, and tmpmail tells you so.
-
-### Choose the provider
-
-`tmpmail new` tries the providers in order (`mailtm, dropmail, guerrilla, tempmail_lol,
-mailgw`) and uses the first one that works, telling you if it had to skip one. To use one
-in particular, or change the order:
-
-```sh
-tmpmail new -p guerrilla             # only Guerrilla Mail, no fallback
-tmpmail providers --check            # which ones are up right now
-TMPMAIL_PROVIDER=dropmail,mailtm tmpmail new
-```
-
-The order can also be set for good in the [config file](#configuration).
-In the TUI, `N` picks the provider.
-
-### Read your mail
-
-```sh
-tmpmail                  # list messages, newest first (same as tmpmail ls)
-tmpmail read 1           # read the newest; long ones open in a pager
-tmpmail read 1 --html    # the HTML version in your browser, sanitized, no remote images
-```
-
-A message can be named by its number in the list, its id, or the first characters of its
-id. With no number, commands use the newest message.
-
-### Wait for a code or link
-
-```sh
-tmpmail otp --wait                    # wait for a new mail with a code, print the code
-tmpmail wait --link --from github     # wait for a mail from GitHub, print its best link
-tmpmail otp 1                         # the code in a message you already have
-tmpmail links 1                       # every link in it, verification links first
-```
-
-Waiting gives up after 180 seconds (`-t` to change it) with exit code 2. It only accepts
-mail that arrives after you start; add `--include-existing` if the mail may already be
-there. `--from`, `--subject` and `--body` narrow it down, and plain words work.
-
-### Live push
-
-With mail.tm and DropMail, tmpmail keeps a connection open and the provider announces new
-mail the moment it lands, so `wait`, `watch` and the TUI react in about a second. Other
-providers are checked every 5 seconds. The TUI shows `● live` while the connection is up,
-and through a quick reconnect.
-Nothing to set up; turn it off with `TMPMAIL_PUSH=0` or `push = false` in the config.
-
-### Attachments
-
-```sh
-tmpmail attachments 1                 # list them
-tmpmail save 1 -o ~/Downloads         # download all of them
-tmpmail save 1 invoice.pdf            # or just one
-```
-
-File names are cleaned up and existing files are never overwritten. Works on mail.tm,
-mail.gw, DropMail and Guerrilla Mail.
-
-### Several inboxes
-
-Give inboxes labels and switch between them by label, address, or the part before `@`:
-
-```sh
-tmpmail new -l github
-tmpmail new -l shop
-tmpmail inboxes                       # all of them, with expiry; * = active
-tmpmail -i github ls                  # one command on another inbox
-tmpmail use shop                      # make it the active one
-tmpmail ls -a                         # mail in every inbox
-tmpmail otp --wait -a                 # a code arriving at any of them
-```
-
-A label belongs to one inbox: `new -l`, `login -l`, the MCP server's `create_inbox`, the TUI
-and the desktop app refuse one that another inbox already has (or has as its address or local
-part), and `rotate --keep` moves the label to the new inbox. A new or logged-in address can't
-be named after another inbox's label either (`new -u work` while another inbox is `work`), and
-a label always wins over a local part in `-i`.
-
-### Log back in
-
-mail.tm and mail.gw inboxes are real accounts that last until you delete them. Set a
-password to use one elsewhere, or log in to an account you made on their website:
-
-```sh
-tmpmail new -p mailtm --password 'correct horse'   # then log in on mail.tm with it
-tmpmail login otter42@maxxspace.com --password 'correct horse'
-```
-
-DropMail sessions expire when idle. tmpmail brings the same address back automatically the
-next time you use it, but mail from the expired session is gone. Guerrilla Mail sessions
-are re-attached to the same address the same way. Maildrop
-inboxes are public, so `tmpmail login name@maildrop.cc` needs no password.
-
-### Clean up
-
-```sh
-tmpmail delete 1                      # delete one message
-tmpmail delete --all                  # every message in the inbox
-tmpmail drop                          # delete the inbox at the provider and forget it
-tmpmail rotate                        # swap the active address for a fresh one
-tmpmail watch --rotate 30m            # a fresh address every 30 minutes
-tmpmail inboxes --prune               # forget inboxes that have expired
-```
-
-Deleting messages works on mail.tm, mail.gw, Guerrilla Mail and Maildrop.
+[sdushantha/tmpmail](https://github.com/sdushantha/tmpmail) was a shell script whose only
+service, 1secmail, has shut down. This is a rewrite, and its old flags still work:
+`tmpmail -g [ADDR]`, `tmpmail`, `tmpmail -r`, `tmpmail ID`, `-d`, `-c`, `-t`.
+[How the old flags map](docs/usage.md#original-tmpmail-flags).
 
 ## Providers
 
-| Provider | Lifetime | [Username](#choose-the-username) | [Domain](#pick-a-domain) | [Attachments](#attachments) | [Push](#live-push) | [Delete](#clean-up) | Raw source (`read --raw`) | [Log back in](#log-back-in) |
+| Provider | Lifetime | Own username | Pick domain | Attachments | Instant | Delete | Raw source | Log back in |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 | [mail.tm](https://mail.tm) `mailtm` | until deleted; mail kept 7 days | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | password |
 | [DropMail.me](https://dropmail.me) `dropmail` | renewed while used | | ✓ | ✓ | ✓ | | ✓ | automatic |
@@ -371,17 +321,13 @@ Deleting messages works on mail.tm, mail.gw, Guerrilla Mail and Maildrop.
 | [mail.gw](https://mail.gw) `mailgw` | until deleted; mail kept 7 days | ✓ | ✓ | ✓ | | ✓ | ✓ | password |
 | [Maildrop](https://maildrop.cc) `maildrop` | 24 h without mail | ✓ | | | | ✓ | ✓ | by name |
 
-- **Maildrop is public**: anyone who guesses the name can read the inbox. It is never used
-  unless you ask for it with `-p maildrop`, and its first mail may be delayed by greylisting.
-- **tempmail.lol** is the last resort: no attachments, and a mail with a text attachment
-  arrives with the attachment in place of its body.
-- **mail.gw** runs the same software as mail.tm and is tried last.
+- **Maildrop is public:** anyone who guesses the name can read the inbox, so it is only used
+  when you ask for it.
+- **tempmail.lol** is the last resort: it has no attachments.
+- Many sites block known disposable domains; [another domain](#choose-the-username-or-the-domain)
+  or provider usually gets through.
 
-How tmpmail picks one is under [choose the provider](#choose-the-provider). Only documented
-APIs are used. Many sites block known disposable domains; [another domain](#pick-a-domain)
-or provider usually gets through.
-
-Thanks to **mail.tm** for its free API; per its terms this client links back to it.
+Thanks to **mail.tm** for its free API; as its terms ask, this program links back to it.
 
 ## Reference
 
@@ -392,26 +338,25 @@ Thanks to **mail.tm** for its free API; per its terms this client links back to 
 | Command | What it does |
 |---|---|
 | `new [ADDR] [-u USER] [-d DOMAIN] [-p PROVIDER] [-l LABEL] [-c]` | Create an inbox (alias `generate`) |
-| `ls [-a]` | List messages, newest first, `*` = unread (not yet opened with `read`, the TUI or the app); `-a` = all your inboxes |
-| `read [ID\|N] [--recent] [--html [--images]] [--raw] [--no-pager]` | Show a message (long ones in a pager) |
-| `wait [-a] [--from RE] [--subject RE] [--body RE] [--timeout S] [--otp\|--link] [--delete]` | Block until a matching message arrives |
-| `otp [ID] [--regex RE] [--wait ...]` | Extract a verification code |
-| `links [ID] [--match RE] [--first] [--open]` | Extract links, verification links first |
-| `watch [-a] [--notify] [--rotate 30m]` | Stream new messages (JSON lines with `--json`); `--rotate` = fresh address on a timer |
+| `ls [-a]` | List messages, newest first, `*` = unread; `-a` = every inbox |
+| `read [ID\|N] [--recent] [--html [--images]] [--raw] [--no-pager]` | Show a message |
+| `wait [-a] [--from RE] [--subject RE] [--body RE] [--timeout S] [--otp\|--link] [--delete]` | Wait for a matching message |
+| `otp [ID] [--regex RE] [--wait ...]` | Print a verification code |
+| `links [ID] [--match RE] [--first] [--open]` | Print links, verification links first |
+| `watch [-a] [--notify] [--rotate 30m]` | Print new messages as they arrive |
 | `attachments ID`, `save ID [ATT...] [-o DIR]` | List / download attachments |
 | `delete ID`, `delete --all` | Delete messages |
-| `whoami`, `copy`, `qr` | Show / copy / QR-code the active address |
-| `inboxes [--prune]`, `use ADDR`, `-i ADDR` | Manage several inboxes (by address, local part or label) |
-| `login ADDR --password PW` | Attach an existing mail.tm / mail.gw account |
+| `whoami`, `copy`, `qr` | Show / copy / show as QR code the active address |
+| `inboxes [--prune]`, `use ADDR`, `-i ADDR` | Manage several inboxes |
+| `login ADDR --password PW` | Use an existing mail.tm / mail.gw account |
 | `rotate [--keep]` | Replace the active address with a fresh one |
-| `domains [-p PROVIDER]`, `providers [--check]` | Domains, provider capabilities and live status |
-| `tui` | Full-screen browser, updated live |
-| `mcp` | MCP server on stdio for AI agents |
+| `domains [-p PROVIDER]`, `providers [--check]` | Domains, and which services are up |
+| `tui` | Full-screen view, updated live |
+| `mcp` | MCP server for AI agents |
 | `completions bash\|zsh\|fish`, `man [-o DIR]` | Shell completions, man pages |
 
-Messages can be referenced by full id, by their number in `tmpmail ls`, or by a unique id
-prefix. Every option is explained in [docs/usage.md](docs/usage.md), and the `--json`
-output in [docs/json.md](docs/json.md).
+Every option is explained in [docs/usage.md](docs/usage.md), and the `--json` output in
+[docs/json.md](docs/json.md).
 
 </details>
 
@@ -423,11 +368,11 @@ output in [docs/json.md](docs/json.md).
 | 0 | success |
 | 1 | other error |
 | 2 | `wait` timed out |
-| 3 | provider failure (unreachable, rate limited, auth, bad response) |
+| 3 | the service failed (down, rate limited, login refused, bad answer) |
 | 4 | nothing found (no inbox, no such message, no code in the message) |
-| 64 | usage error (bad flag, unsupported option for this provider) |
+| 64 | usage error (bad flag, or an option this service doesn't support) |
 
-In `--json` mode, errors are printed as `{"error":{"kind":"...","message":"..."}}`.
+With `--json`, errors are printed as `{"error":{"kind":"...","message":"..."}}`.
 
 </details>
 
@@ -438,84 +383,59 @@ In `--json` mode, errors are printed as `{"error":{"kind":"...","message":"..."}
 `~/.config/tmpmail/config.toml` (or `$TMPMAIL_CONFIG`), all optional:
 
 ```toml
-providers = ["mailtm", "guerrilla"]   # fallback order for `new`
+providers = ["mailtm", "guerrilla"]   # order for `new`
 browser = "firefox"                   # for --html and links --open
 clipboard_cmd = "wl-copy"
-pager = "less"                        # for long messages in `read` (default $PAGER, else less)
-poll_interval = 5                     # seconds, for wait/watch
+pager = "less"                        # for long messages (default $PAGER, else less)
+poll_interval = 5                     # seconds between checks
 timeout = 180                         # default wait timeout
-push = true                           # live push from mail.tm/DropMail in wait/watch
-http_timeout = 20                     # seconds per request to a provider (new in 0.3.0)
+push = true                           # instant new mail from mail.tm/DropMail
+http_timeout = 20                     # seconds per request to a service
 ```
 
-A key tmpmail doesn't know (a typo, or one from a newer version) is ignored with a warning
-on stderr (`-q` and `--json` silence it): tmpmail 0.2.0 and earlier refuse unknown config
-keys; 0.3.0 and later warn. A known key with a bad value is still an error, and so is
-`providers = []` (leave the key out for the default order).
+An unknown key is ignored with a warning. A bad value is an error.
 
 Environment: `TMPMAIL_PROVIDER` (comma list), `TMPMAIL_TIMEOUT`, `TMPMAIL_POLL_INTERVAL`,
-`TMPMAIL_PUSH`, `TMPMAIL_HTTP_TIMEOUT`, `TMPMAIL_INBOX`, `TMPMAIL_PASSWORD`, `TMPMAIL_STATE_DIR`,
-`TMPMAIL_DROPMAIL_TOKEN`, `PAGER`, `NO_COLOR`. The number variables are checked like their
-config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
+`TMPMAIL_PUSH`, `TMPMAIL_HTTP_TIMEOUT`, `TMPMAIL_INBOX`, `TMPMAIL_PASSWORD`,
+`TMPMAIL_STATE_DIR`, `TMPMAIL_DROPMAIL_TOKEN`, `PAGER`, `NO_COLOR`.
 
 </details>
 
 ## Privacy and security
 
-- State (addresses and their credentials) lives in `$XDG_STATE_HOME/tmpmail/state.json`
-  (`~/.local/state/tmpmail`), directory `0700`, file `0600`, never in `/tmp`. It (and DropMail's token cache) is
-  written to a new file that replaces the old one, so a link in its place is replaced too.
-- Message text is stripped of terminal escape sequences (whole: `ESC[31m` goes, not only the
-  ESC), control characters, bidi controls (U+202A–U+202E, U+2066–U+2069, U+200E/F, U+061C)
-  and other invisible format characters before printing, so a sender can't rewrite your
-  terminal or make a line read backwards. The desktop app cleans the sender, subject,
-  preview, attachment names, links and provider domains the same way before the window
-  shows them.
-- `read --html` writes a sanitized copy (no scripts, forms, frames; strict CSP; no
-  relative or `//host` links, `data:` only as an inline picture, and inline styles keep only
-  look-and-layout properties, so nothing can be laid over the mail) and
-  **blocks remote images** (tracking pixels) unless you pass `--images` (then they load from
-  the sender's servers, Guerrilla Mail's too, not through its proxy). These copies are
-  deleted after a day. They are written to `view/` in the state folder, readable only by
-  you (`0600` in a `0700` folder); when the browser is a snap (Firefox on Ubuntu and
-  Kubuntu), which can't read hidden folders in your home, to `~/snap/NAME/common/tmpmail-view/`
-  instead, the one place outside its sandbox it may always read. The snap can write there,
-  so that folder is used through open folder handles (a link put anywhere on the way is
-  refused, and the state folder used instead), and only tmpmail's own `tmpmail-*.html`
-  copies there (and the first builds' `ID.html` ones, checked by their contents) are ever
-  deleted, in every snap's folder, so an earlier browser's go too.
-- Attachment names are sanitized so they can't escape the target directory, and
-  existing files are never overwritten (nor written through a link put in their place);
-  on Windows and macOS saved files are marked as downloaded from the internet;
-  Windows device names such as `CON` get a `_` in front, and a leading `-` becomes `_`.
-- `tmpmail mcp` hands message contents to an AI agent. Anyone can mail a temp address, so
-  treat what the agent reads there as untrusted input.
-- Provider answers are read up to a limit (64 MiB for a raw message or an attachment, a bit
-  more for a JSON answer that holds one), and an attachment's download address gets the inbox's credentials only when
-  it is on the provider's own site.
-- No telemetry. The only network traffic is to the provider you use.
+- **No telemetry.** tmpmail only talks to the mail service you use.
+- **Your inboxes stay private.** Addresses and their passwords are kept in
+  `~/.local/state/tmpmail/state.json`, readable only by you.
+- **Mail can't take over your terminal.** Hidden characters and terminal control codes are
+  removed before anything is shown, so a sender can't change your screen or fake a name.
+- **HTML mail is made safe.** `read --html` and the desktop app remove scripts, forms and
+  anything that could cover the mail, and **block remote images** (tracking pixels) unless
+  you allow them (`--images`). Links only open if they are real web addresses.
+- **Attachments are saved safely.** Names can't leave the folder you chose, existing files
+  are never overwritten, and on Windows and macOS saved files are marked as downloaded.
+- **AI agents:** anyone can mail a throwaway address, so treat what an agent reads there as
+  untrusted.
+
+The details are in [docs/usage.md](docs/usage.md#privacy-and-security-in-detail) and the app's
+[security model](gui/README.md).
 
 ## Development
 
 ```sh
-cargo test                  # unit tests + provider tests against a mock HTTP server
+cargo test                  # unit tests + provider tests against a mock server
 cargo clippy --all-targets
-./scripts/smoke.sh          # live check against the real providers (creates throwaway inboxes)
-vhs assets/demo/demo.tape   # re-record the demo (needs vhs, and outbound SMTP for the test mail)
+./scripts/smoke.sh          # a live check against the real services
+vhs assets/demo/demo.tape   # re-record the demo
 ```
 
-Every push to `main` and every pull request, and a weekly run, check `Cargo.lock` against the RustSec
-advisory database ([audit workflow](.github/workflows/audit.yml), `cargo deny check
-advisories`). The advisories that have no fix within semver yet are listed in
-[`deny.toml`](deny.toml), each with the reason it is accepted.
+CI checks `Cargo.lock` against the RustSec advisory database on every push and every week
+([audit workflow](.github/workflows/audit.yml); accepted advisories are listed with their
+reasons in [`deny.toml`](deny.toml)).
 
 The crate is also a library: `tmpmail = { version = "0.3", default-features = false }`
-gives the providers, stored inboxes, watcher and mail sanitizing (`tmpmail::provider`,
-`tmpmail::store`, `tmpmail::watcher`, ...) without the CLI's dependencies. Its API isn't
-stable yet.
-
-The desktop app is in [`gui/`](gui/README.md) (see [Desktop app](#desktop-app-preview)),
-with its own `gui-v*` releases.
+gives the providers, inbox storage, watcher and mail cleaning without the command-line
+parts. Its API isn't stable yet. The desktop app is in [`gui/`](gui/README.md), with its own
+`gui-v*` releases.
 
 ## License
 

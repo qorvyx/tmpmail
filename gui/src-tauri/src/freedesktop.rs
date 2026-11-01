@@ -115,7 +115,7 @@ pub struct Request {
     pub body: String,
     /// Pairs of action id and label: `default` is a click on the
     /// notification. Its label shows only where a server lists actions
-    /// (dunst's menu, for one); Plasma 6.6's history shows its own "View"
+    /// (dunst's menu, for one); Plasma's history shows its own "View"
     /// button for it, and GNOME doesn't show it.
     pub actions: Vec<&'static str>,
     pub hints: Vec<(&'static str, &'static str)>,

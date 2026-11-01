@@ -1244,7 +1244,7 @@ mod tests {
         use std::os::unix::fs::symlink;
         let dir = tempfile::tempdir().unwrap();
         let snapd = fake_snapd(dir.path());
-        // Kubuntu's default browser: the snap's desktop file.
+        // A snap browser as the default: the snap's desktop file.
         std::fs::write(snapd.desktop.join("firefox_firefox.desktop"), "").unwrap();
         let desktop = |id| snap_of_desktop_id(id, &snapd);
         assert_eq!(

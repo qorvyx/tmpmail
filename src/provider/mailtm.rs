@@ -549,7 +549,7 @@ mod tests {
         );
     }
 
-    /// Campaign round 2's long mail (B7): 2 500 lines, its text cut at
+    /// A long mail: 2 500 lines, its text cut at
     /// exactly 102 400 bytes, mid-line; the source has all of it.
     #[test]
     fn a_cut_text_comes_whole_from_the_source() {

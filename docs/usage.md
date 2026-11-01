@@ -516,3 +516,40 @@ These still work when used as the **first** argument, so old scripts keep runnin
 | 4 | Nothing found: no inbox yet, no such message, no code or link in the message |
 | 64 | Wrong usage: bad option, or the provider doesn't support it |
 | 141 | Output pipe closed early (e.g. `| head`); normal Unix behaviour |
+
+## Privacy and security in detail
+
+
+- State (addresses and their credentials) lives in `$XDG_STATE_HOME/tmpmail/state.json`
+  (`~/.local/state/tmpmail`), directory `0700`, file `0600`, never in `/tmp`. It (and DropMail's token cache) is
+  written to a new file that replaces the old one, so a link in its place is replaced too.
+- Message text is stripped of terminal escape sequences (whole: `ESC[31m` goes, not only the
+  ESC), control characters, bidi controls (U+202A–U+202E, U+2066–U+2069, U+200E/F, U+061C)
+  and other invisible format characters before printing, so a sender can't rewrite your
+  terminal or make a line read backwards. The desktop app cleans the sender, subject,
+  preview, attachment names, links and provider domains the same way before the window
+  shows them.
+- `read --html` writes a sanitized copy (no scripts, forms, frames; strict CSP; no
+  relative or `//host` links, `data:` only as an inline picture, and inline styles keep only
+  look-and-layout properties, so nothing can be laid over the mail) and
+  **blocks remote images** (tracking pixels) unless you pass `--images` (then they load from
+  the sender's servers, Guerrilla Mail's too, not through its proxy). These copies are
+  deleted after a day. They are written to `view/` in the state folder, readable only by
+  you (`0600` in a `0700` folder); when the browser is a snap (Firefox on Ubuntu and
+  Kubuntu), which can't read hidden folders in your home, to `~/snap/NAME/common/tmpmail-view/`
+  instead, the one place outside its sandbox it may always read. The snap can write there,
+  so that folder is used through open folder handles (a link put anywhere on the way is
+  refused, and the state folder used instead), and only tmpmail's own `tmpmail-*.html`
+  copies there (and the first builds' `ID.html` ones, checked by their contents) are ever
+  deleted, in every snap's folder, so an earlier browser's go too.
+- Attachment names are sanitized so they can't escape the target directory, and
+  existing files are never overwritten (nor written through a link put in their place);
+  on Windows and macOS saved files are marked as downloaded from the internet;
+  Windows device names such as `CON` get a `_` in front, and a leading `-` becomes `_`.
+- `tmpmail mcp` hands message contents to an AI agent. Anyone can mail a temp address, so
+  treat what the agent reads there as untrusted input.
+- Provider answers are read up to a limit (64 MiB for a raw message or an attachment, a bit
+  more for a JSON answer that holds one), and an attachment's download address gets the inbox's credentials only when
+  it is on the provider's own site.
+- No telemetry. The only network traffic is to the provider you use.
+

@@ -5,7 +5,7 @@
 A Tauri 2 window on top of tmpmail's core library, with the same inboxes as the CLI (same
 `state.json` and config). Inboxes, live mail, the verification code one click (or `y`) away,
 a safe HTML preview in light or dark, and the TUI's actions and keys. Released as a
-preview on `gui-v*` tags; install steps are in the [main README](../README.md#desktop-app-preview).
+preview on `gui-v*` tags; install steps are in the [main README](../README.md#desktop-app).
 
 ## Features
 

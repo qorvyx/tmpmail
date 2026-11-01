@@ -23,15 +23,27 @@ tmpmail otp --wait --include-existing    # waits for the mail, then prints 48291
 It uses free public mail services (mail.tm, DropMail, Guerrilla Mail and
 [others](#providers)). If one is down, tmpmail uses the next one.
 
-**Contents:** [Install](#install) · [Quick start](#quick-start) ·
-[Desktop app](#desktop-app-preview) · [Guide](#guide) · [Scripts and CI](#in-a-script-or-ci) ·
-[AI agents](#with-an-ai-agent) · [Providers](#providers) · [Reference](#reference) ·
-[Privacy and security](#privacy-and-security)
+**Contents**
+
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Desktop app](#desktop-app-preview)
+- [Guide](#guide)
+- [Scripts and CI](#in-a-script-or-ci)
+- [AI agents](#with-an-ai-agent)
+- [Providers](#providers)
+- [Reference](#reference)
+- [Privacy and security](#privacy-and-security)
 
 ## Install
 
-tmpmail works on Linux (Fedora, Debian, Ubuntu, Arch and others), macOS and Windows. It is
-one file with nothing else to install.
+tmpmail works on Linux (Fedora, Debian, Ubuntu, Arch and others), macOS and Windows. There
+are two parts: the **command-line tool** (with the full-screen view and the AI agent
+server) and the **desktop app**. Install one or both; they share the same inboxes.
+
+### Command-line tool
+
+It is one file with nothing else to install.
 
 | System | How to install |
 |---|---|
@@ -68,35 +80,9 @@ gh attestation verify tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz --repo qorv
 `xclip` or `xsel` on Linux (`pbcopy` on macOS, `clip.exe` on Windows); `read --html` opens your
 browser; `watch --notify` uses `notify-send` on Linux; long messages open in `less`.
 
-## Quick start
+### Desktop app
 
-```sh
-tmpmail new            # make an address
-tmpmail                # list the mail that arrived
-tmpmail read 1         # read the newest message
-tmpmail otp --wait     # wait for a mail with a code and print the code
-tmpmail tui            # or browse everything in a full-screen view
-```
-
-The address you made last is the *active* one; every command uses it unless you
-[pick another](#several-inboxes).
-
-![The tmpmail TUI receiving a mail live and copying its code](assets/tui.gif)
-
-In the full-screen view (`tmpmail tui`), mail shows up as it arrives, the code is
-highlighted, and `y` copies it. Press `?` for the keys.
-
-## Desktop app (preview)
-
-Rather have a window? The desktop app does the same with the same inboxes: it shows your
-mail live, puts the code in a big banner with a Copy button, shows HTML mail safely (light
-or dark), saves attachments, notifies you of new mail, and can stay in the tray.
-[More about the app](gui/README.md).
-
-![The tmpmail desktop app showing a verification code in a banner above the mail](assets/desktop.png)
-
-It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS and on Windows. Download
-it from the [releases page](https://github.com/qorvyx/tmpmail/releases) (the `gui-v*`
+Download it from the [releases page](https://github.com/qorvyx/tmpmail/releases) (the `gui-v*`
 releases):
 
 | System | File | How to install |
@@ -129,6 +115,35 @@ releases):
 - To run it from source (Rust 1.90+, Node 24, pnpm): `cd gui && pnpm install && pnpm tauri dev`.
 
 </details>
+
+## Quick start
+
+```sh
+tmpmail new            # make an address
+tmpmail                # list the mail that arrived
+tmpmail read 1         # read the newest message
+tmpmail otp --wait     # wait for a mail with a code and print the code
+tmpmail tui            # or browse everything in a full-screen view
+```
+
+The address you made last is the *active* one; every command uses it unless you
+[pick another](#several-inboxes).
+
+![The tmpmail TUI receiving a mail live and copying its code](assets/tui.gif)
+
+In the full-screen view (`tmpmail tui`), mail shows up as it arrives, the code is
+highlighted, and `y` copies it. Press `?` for the keys.
+
+## Desktop app (preview)
+
+Rather have a window? The desktop app does the same with the same inboxes: it shows your
+mail live, puts the code in a big banner with a Copy button, shows HTML mail safely (light
+or dark), saves attachments, notifies you of new mail, and can stay in the tray.
+[More about the app](gui/README.md).
+
+![The tmpmail desktop app showing a verification code in a banner above the mail](assets/desktop.png)
+
+To install it, see [Install → Desktop app](#desktop-app).
 
 ## Guide
 

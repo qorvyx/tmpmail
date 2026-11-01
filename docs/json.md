@@ -38,6 +38,10 @@ Credentials are never printed.
 `ls --all-inboxes` returns `{"inboxes": [{"address", "created_at", "messages": [...], "error"?}, ...]}`.
 `error` (`{"kind", "message"}`) is present only for an inbox that couldn't be read.
 
+`from` and `subject` (and, in a full message, `to` and attachment file names) are decoded
+the same way with every provider: RFC 2047 encoded-words such as `=?utf-8?q?Zo=C3=AB?=`
+come out as text. `intro` has no line break at its end.
+
 `seen` is true once the message was opened with `read`, in the TUI or in the desktop app, or
 when the provider marks it read itself.
 

@@ -2,6 +2,7 @@ mod dropmail;
 mod guerrilla;
 mod maildrop;
 mod mailtm;
+mod mime;
 mod tempmail_lol;
 
 use chrono::{DateTime, Utc};
@@ -35,7 +36,7 @@ pub fn all() -> impl Iterator<Item = &'static str> {
 
 pub fn get(id: &str) -> Result<Box<dyn Provider>> {
     match REGISTRY.iter().find(|(known, _)| *known == id) {
-        Some((_, make)) => Ok(make()),
+        Some((_, make)) => Ok(Box::new(Decoded(make()))),
         None => Err(Error::Usage(format!(
             "unknown provider {id:?}, expected one of: {}",
             all().collect::<Vec<_>>().join(", ")
@@ -136,7 +137,9 @@ impl Message {
                 .unwrap_or_default()
                 .chars()
                 .take(100)
-                .collect(),
+                .collect::<String>()
+                .trim_end()
+                .to_string(),
             date: self.date,
             seen: false,
             has_attachments: !self.attachments.is_empty(),
@@ -247,6 +250,87 @@ pub trait Provider {
     /// Whether `login` can tell from the address alone that it belongs here.
     fn owns_address(&self, _address: &str) -> bool {
         false
+    }
+}
+
+/// A provider whose headers come out decoded: RFC 2047 encoded-words in
+/// senders, recipients, subjects and attachment names (tempmail.lol passes
+/// them on as they are), and no line break at the end of the preview.
+/// Every other call is passed through, so it must list every trait method.
+struct Decoded(Box<dyn Provider>);
+
+fn decoded_summary(mut s: Summary) -> Summary {
+    s.from = mime::decode_words(&s.from);
+    s.subject = mime::decode_words(&s.subject);
+    s.intro.truncate(s.intro.trim_end().len());
+    s
+}
+
+fn decoded_message(mut m: Message) -> Message {
+    m.from = mime::decode_words(&m.from);
+    m.subject = mime::decode_words(&m.subject);
+    for to in &mut m.to {
+        *to = mime::decode_words(to);
+    }
+    for a in &mut m.attachments {
+        a.filename = mime::decode_words(&a.filename);
+    }
+    m
+}
+
+impl Provider for Decoded {
+    fn id(&self) -> &'static str {
+        self.0.id()
+    }
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+    fn website(&self) -> &'static str {
+        self.0.website()
+    }
+    fn caps(&self) -> Capabilities {
+        self.0.caps()
+    }
+    fn domains(&self) -> Result<Vec<String>> {
+        self.0.domains()
+    }
+    fn create(&self, opts: &CreateOpts) -> Result<Inbox> {
+        self.0.create(opts)
+    }
+    fn list(&self, inbox: &mut Inbox) -> Result<Vec<Summary>> {
+        Ok(self
+            .0
+            .list(inbox)?
+            .into_iter()
+            .map(decoded_summary)
+            .collect())
+    }
+    fn get(&self, inbox: &mut Inbox, id: &str) -> Result<Message> {
+        self.0.get(inbox, id).map(decoded_message)
+    }
+    fn health(&self) -> Result<()> {
+        self.0.health()
+    }
+    fn raw(&self, inbox: &mut Inbox, id: &str) -> Result<Vec<u8>> {
+        self.0.raw(inbox, id)
+    }
+    fn attachment(&self, inbox: &mut Inbox, msg: &Message, att: &Attachment) -> Result<Vec<u8>> {
+        self.0.attachment(inbox, msg, att)
+    }
+    fn delete_message(&self, inbox: &mut Inbox, id: &str) -> Result<()> {
+        self.0.delete_message(inbox, id)
+    }
+    fn delete_inbox(&self, inbox: &mut Inbox) -> Result<()> {
+        self.0.delete_inbox(inbox)
+    }
+    fn login(&self, address: &str, password: &str) -> Result<Inbox> {
+        self.0.login(address, password)
+    }
+    fn push(&self, inbox: &Inbox) -> Option<Box<dyn PushStream>> {
+        self.0.push(inbox)
+    }
+    fn owns_address(&self, address: &str) -> bool {
+        self.0.owns_address(address)
     }
 }
 
@@ -390,6 +474,29 @@ mod tests {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
             "{u}"
         );
+    }
+
+    #[test]
+    fn headers_come_out_decoded() {
+        let mut m = Message {
+            from: "=?utf-8?q?Zo=C3=AB_=C3=9Cnicode?= <hello@example.org>".into(),
+            to: vec!["=?utf-8?q?A?= <a@x.com>".into()],
+            subject: "=?utf-8?b?Q2Fmw6kgcsOpc3Vtw6kg4pyT?= code".into(),
+            text: Some("Grüße, code 551177\r\n".into()),
+            ..Default::default()
+        };
+        m.attachments.push(Attachment {
+            filename: "=?utf-8?q?r=C3=A9sum=C3=A9.pdf?=".into(),
+            ..Default::default()
+        });
+        let s = decoded_summary(m.summary());
+        assert_eq!(s.from, "Zoë Ünicode <hello@example.org>");
+        assert_eq!(s.subject, "Café résumé ✓ code");
+        assert_eq!(s.intro, "Grüße, code 551177");
+        let m = decoded_message(m);
+        assert_eq!(m.subject, "Café résumé ✓ code");
+        assert_eq!(m.to, ["A <a@x.com>"]);
+        assert_eq!(m.attachments[0].filename, "résumé.pdf");
     }
 
     #[test]

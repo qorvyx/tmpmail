@@ -237,6 +237,30 @@ mod tests {
     }
 
     #[test]
+    fn encoded_headers_are_decoded() {
+        let mut s = Server::new();
+        s.mock("GET", "/inbox")
+            .match_query(Matcher::Any)
+            .with_body(
+                r#"{"emails":[{"from":"=?utf-8?q?Zo=C3=AB_=C3=9Cnicode?= <hello@example.org>",
+                "subject":"=?utf-8?b?Q2Fmw6kgcsOpc3Vtw6kg4pyT?= code",
+                "body":"Grüße, code 551177\r\n","date":1791194910000}],"expired":false}"#,
+            )
+            .create();
+        let p = super::super::Decoded(Box::new(TempmailLol {
+            base: s.url(),
+            http: Http::new("tempmail_lol"),
+        }));
+        let mut inbox = Inbox::new("tempmail_lol", "a@b.c".into(), json!({"token":"t"}));
+        let list = p.list(&mut inbox).unwrap();
+        assert_eq!(list[0].from, "Zoë Ünicode <hello@example.org>");
+        assert_eq!(list[0].subject, "Café résumé ✓ code");
+        assert_eq!(list[0].intro, "Grüße, code 551177");
+        let msg = p.get(&mut inbox, &list[0].id).unwrap();
+        assert_eq!(msg.subject, "Café résumé ✓ code");
+    }
+
+    #[test]
     fn expired_inbox_is_reported() {
         let mut s = Server::new();
         s.mock("GET", "/inbox")

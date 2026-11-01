@@ -125,7 +125,9 @@ Other clients take `{ "command": "tmpmail", "args": ["mcp"] }`. The tools are
 `create_inbox`, `list_inboxes`, `list_messages`, `read_message`, `wait_for_message`,
 `get_verification_code`, `get_links`, `delete_message` and `delete_inbox`. Waits run in
 parallel and can be cancelled. Anyone can mail a temp address, so treat what the agent reads
-there as untrusted input. [Details](docs/usage.md#mcp-server-for-ai-agents).
+there as untrusted input: the server strips invisible and control characters (hidden text
+included) from what it hands over, cuts long fields, and marks mail results
+`untrusted_content`. [Details](docs/usage.md#mcp-server-for-ai-agents).
 
 ### In the terminal
 

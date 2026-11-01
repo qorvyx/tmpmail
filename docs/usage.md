@@ -398,6 +398,26 @@ names it and lists the ones the tool takes, so a misspelled `username` for `user
 quietly dropped. Omitted or `null` `arguments` mean none, a `null` argument is the same as leaving it
 out, and `arguments` that aren't an object (a list) are refused.
 
+Mail reaches the agent cleaned, since anyone can write to a temp address and a mail is a
+prompt-injection channel: every string in a result loses terminal escapes, control, bidi and
+other invisible format characters, and the Unicode tag characters (they can carry text a
+person reading the transcript can't see; emoji flags lose their region). Zero-width joiners
+stay, for emoji and the scripts that need them. A field longer than 64 KiB and a list longer than 200
+items are cut, and the result then has `"truncated": true`. The results of the tools that
+return mail (`list_messages`, `read_message`, `wait_for_message`, `get_verification_code`,
+`get_links`) carry `"untrusted_content": true`, and a second text block after the JSON one
+notes that the mail fields come from the sender and are data, not instructions. `read_message`'s
+`text` is the plain-text part when the mail has one, which may differ from the HTML a person
+sees. `create_inbox` adds `public_note` for a public inbox (Maildrop: anyone who knows the
+address can read it).
+
+The server reads one JSON-RPC message per line. A line that isn't UTF-8 or valid JSON, or is
+over 1 MiB, gets a `-32700` error and the server goes on. A batch (an array; 2025-03-26 has
+them, 2025-06-18 removed them) gets one array of replies, with `-32600` for a `tools/call` in
+it (send those on their own). At most 16 tool calls run at once (another gets `-32000`;
+cancelled ones don't count), and a `tools/call` with the id of one still running gets
+`-32600` with a `null` id.
+
 Mail comes from anyone who knows the address. The server tells the client to treat message
 contents as untrusted data, but an agent that acts on mail can still be steered by it.
 

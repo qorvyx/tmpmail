@@ -39,6 +39,10 @@ what breaks:
 - **Long mail from mail.tm shows whole.** mail.tm cuts a message's text at 100 KiB without
   a word; the app (through the core of CLI 0.3.5) now reads the rest from the raw message,
   or says the text may be cut and that Source has all of it.
+- **AppImage: notifications show the logo.** Without an installed desktop file GNOME showed
+  a generic icon on them; they now name the logo by a file in the cache folder. The window's
+  icon on Wayland still needs the AppImage integrated (AppImageLauncher, Gear Lever, or by
+  hand): the README says how.
 - **A narrow message pane stays readable.** With the window tiled to half the screen, the
   sender's name ran over the date and the links were cut to a letter or two. The message
   list now gives way (down to 280 px) so the open message keeps 340 px where it can, the

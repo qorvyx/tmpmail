@@ -71,7 +71,9 @@ preview on `gui-v*` tags; install steps are in the [main README](../README.md#de
   under the app's own notification settings (0.1.1 sent the binary's name, `tmpmail-gui`;
   the desktop file has `X-GNOME-UsesNotifications=true`, so GNOME lists the app there before
   its first notification). The AppImage installs no desktop file by itself, so there the
-  hint only helps once a tool like AppImageLauncher has integrated it. On Windows the installed app shows its own toasts, which launch a
+  hint only helps once it is integrated (see "The AppImage"); the AppImage's notifications
+  name the logo by a file (written to `~/.cache/tmpmail/tmpmail-gui.png`) instead of by
+  its icon name, so they show it either way. On Windows the installed app shows its own toasts, which launch a
   `tmpmail-desktop://open?inbox=…&message=…` link the installer registers: a click, on
   screen or later in the notification center, brings the running app back (only one runs:
   a second start hands its link over and exits) or starts it, and opens the message. A
@@ -181,6 +183,42 @@ directory (`tmpmail-drag-*`, mode 0700, one 0700 subdirectory per attachment, th
 0600 under its sanitized name); dragging the grip then drags that file. Files are deleted
 10 minutes later (when another is prepared) and when the app quits. Not on Windows, where
 a drag can hang the whole app (drag-rs #94). Save stays the dependable way.
+
+## The AppImage
+
+The AppImage runs as it is (`chmod +x`, then start it), but installs nothing: no menu
+entry, no desktop file, no icon in the theme. Desktops find an app's name and icon through
+its desktop file, so without one:
+
+- **Window icon:** on X11 the window carries its own icon (`_NET_WM_ICON`) and shows it.
+  On Wayland a window has no icon of its own: the compositor looks up the desktop file
+  named by the app ID (`tmpmail`) and, finding none, shows a generic one (KWin's "W" in
+  the title bar, GNOME's in the overview and dash). Wayland's `xdg-toplevel-icon-v1`
+  would let the window send its icon, but GTK 3, which the app is built on, doesn't
+  speak it.
+- **Notifications:** they name the logo by a file the app writes to
+  `~/.cache/tmpmail/tmpmail-gui.png` (a path inside the AppImage's mount would be gone
+  once it quits, and notification histories keep the icon), so they show the logo (from
+  0.1.4; GNOME showed a generic icon in 0.1.3).
+
+To give it a menu entry and the window icon on Wayland, integrate it with
+[AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) or
+[Gear Lever](https://flathub.org/apps/it.mijorus.gearlever), which install the desktop file
+and icon it carries (under names of their own; its `StartupWMClass=tmpmail` still matches
+the window), or by hand, keeping the name `tmpmail.desktop` so the notifications'
+`desktop-entry` hint finds it too:
+
+```sh
+mkdir -p ~/Applications ~/.local/share/applications ~/.local/share/icons
+mv tmpmail-desktop-VERSION-x86_64.AppImage ~/Applications/tmpmail.AppImage
+cd ~/Applications && ./tmpmail.AppImage --appimage-extract >/dev/null   # into ./squashfs-root
+sed "s|^Exec=.*|Exec=$HOME/Applications/tmpmail.AppImage|" squashfs-root/*.desktop \
+  > ~/.local/share/applications/tmpmail.desktop
+cp -r squashfs-root/usr/share/icons/hicolor ~/.local/share/icons/
+rm -r squashfs-root
+```
+
+(If your home folder's path has spaces, put the `Exec=` path in double quotes.)
 
 ## Dark mail
 

@@ -168,7 +168,9 @@ The app isn't signed with a paid certificate, so each system warns once:
 - **Linux:** `sudo apt install ./tmpmail-desktop-VERSION-amd64.deb` or
   `sudo dnf install ./tmpmail-desktop-VERSION-x86_64.rpm` (both pull in WebKitGTK 4.1), or
   `chmod +x` the AppImage and run it (it may need `libfuse2`; without FUSE, add
-  `--appimage-extract-and-run`). On NVIDIA, if the window stays blank, start it with
+  `--appimage-extract-and-run`). The AppImage installs no menu entry, so on Wayland its
+  window shows a generic icon until it is integrated (AppImageLauncher, Gear Lever, or
+  [by hand](gui/README.md#the-appimage)). On NVIDIA, if the window stays blank, start it with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 
 If you use the CLI too, use **tmpmail 0.3.0 or later**: the app's settings screen can write

@@ -14,8 +14,9 @@
 //! raised as before.
 
 use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
@@ -40,6 +41,64 @@ pub const DESKTOP_ENTRY: &str = crate::PROGRAM;
 /// The notification's icon, by name: the packages install it in the hicolor
 /// theme (the desktop file's `Icon`).
 pub const ICON: &str = "tmpmail-gui";
+
+/// The notification's icon: [`ICON`] by name, except when running from an
+/// AppImage. That installs no desktop file and no icon in the theme, so the
+/// name leads nowhere and servers show a generic icon (GNOME did); a path
+/// inside its mount would go when the app quits, and notification
+/// histories keep the icon. So the app's own logo, built in, is written to
+/// the cache folder and named by its `file://` URI.
+fn icon() -> &'static str {
+    static ICON_NOW: OnceLock<String> = OnceLock::new();
+    ICON_NOW.get_or_init(|| {
+        let cache = dirs_cache().map(|c| c.join("tmpmail").join("tmpmail-gui.png"));
+        match (in_appimage(), cache) {
+            (true, Some(path)) => logo_file(&path).unwrap_or_else(|| ICON.into()),
+            _ => ICON.into(),
+        }
+    })
+}
+
+/// The logo the notifications of an AppImage show.
+const LOGO: &[u8] = include_bytes!("../icons/128x128.png");
+
+/// Whether this program runs from a mounted (or extracted) AppImage: its
+/// own file is under `$APPDIR`. (`APPIMAGE` and `APPDIR` alone could come
+/// from another AppImage this was started from.)
+fn in_appimage() -> bool {
+    let (Some(appdir), Ok(exe)) = (std::env::var_os("APPDIR"), std::env::current_exe()) else {
+        return false;
+    };
+    std::env::var_os("APPIMAGE").is_some() && exe.starts_with(appdir)
+}
+
+fn dirs_cache() -> Option<PathBuf> {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+}
+
+/// Writes [`LOGO`] to `path` (unless it is there already) and returns its
+/// `file://` URI, or `None` if it couldn't be written.
+fn logo_file(path: &Path) -> Option<String> {
+    if std::fs::read(path).ok().as_deref() != Some(LOGO) {
+        std::fs::create_dir_all(path.parent()?).ok()?;
+        let tmp = path.with_extension("png.new");
+        std::fs::write(&tmp, LOGO).ok()?;
+        std::fs::rename(&tmp, path).ok()?;
+    }
+    let mut uri = String::from("file://");
+    for b in path.to_str()?.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~".contains(&b) {
+            uri.push(b as char);
+        } else {
+            uri.push_str(&format!("%{b:02X}"));
+        }
+    }
+    Some(uri)
+}
+
 /// How many notifications remember what a click opens.
 const KEEP: usize = 64;
 /// Longest activation token kept, in bytes.
@@ -69,7 +128,7 @@ pub struct Request {
 pub fn request(summary: &str, body: &str) -> Request {
     Request {
         app_name: APP_NAME,
-        icon: ICON,
+        icon: icon(),
         summary: summary.to_string(),
         body: body.to_string(),
         actions: vec!["default", "Open"],
@@ -424,6 +483,24 @@ mod tests {
                 timeout: -1,
             }
         );
+    }
+
+    #[test]
+    fn an_appimage_names_its_logo_by_a_file_uri_outside_its_mount() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("my cache").join("tmpmail-gui.png");
+        let uri = logo_file(&path).unwrap();
+        assert!(
+            uri.starts_with("file:///") && uri.ends_with("/my%20cache/tmpmail-gui.png"),
+            "{uri}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), LOGO);
+        // A changed or broken file is put right.
+        std::fs::write(&path, "old").unwrap();
+        assert_eq!(logo_file(&path).unwrap(), uri);
+        assert_eq!(std::fs::read(&path).unwrap(), LOGO);
+        // Not an AppImage here (a test binary isn't under any `$APPDIR`).
+        assert!(!in_appimage());
     }
 
     #[test]

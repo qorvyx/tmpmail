@@ -67,7 +67,11 @@ impl Provider for Maildrop {
     }
 
     fn create(&self, opts: &CreateOpts) -> Result<Inbox> {
-        if let Some(d) = opts.domain.as_deref().filter(|d| *d != DOMAIN) {
+        if let Some(d) = opts
+            .domain
+            .as_deref()
+            .filter(|d| !d.eq_ignore_ascii_case(DOMAIN))
+        {
             return Err(domain_unavailable(self.id(), d, &self.domains()?));
         }
         let user = opts.user.clone().unwrap_or_else(random_user).to_lowercase();

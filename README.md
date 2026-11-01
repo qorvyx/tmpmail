@@ -227,7 +227,8 @@ tmpmail new -d yomail.info       # tmpmail finds the provider that has it
 ```
 
 Useful when a site blocks one disposable domain: try another. Works on mail.tm, mail.gw,
-DropMail and Guerrilla Mail.
+DropMail and Guerrilla Mail. For `maildrop.cc`, say `-p maildrop`: Maildrop is public, so it
+is never picked on its own, and tmpmail tells you so.
 
 ### Choose the provider
 

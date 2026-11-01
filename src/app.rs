@@ -468,6 +468,12 @@ impl App {
         exclude: Option<&str>,
         opts: &CreateOpts,
     ) -> Result<Inbox> {
+        if opts.user.as_deref().is_some_and(|u| u.trim().is_empty()) {
+            return Err(Error::Usage("the username is empty".into()));
+        }
+        if opts.domain.as_deref().is_some_and(|d| d.trim().is_empty()) {
+            return Err(Error::Usage("the domain is empty".into()));
+        }
         if let Some(id) = explicit {
             let p = provider::get(id)?;
             let inbox = checked_address(p.as_ref(), p.create(opts)?)?;
@@ -490,6 +496,7 @@ impl App {
         }
         let (mut failures, mut unavailable) = (Vec::new(), Vec::new());
         if let Some(domain) = &opts.domain {
+            check_left_out_domain(&candidates, domain)?;
             candidates = order_by_domain(candidates, domain, &mut unavailable);
         }
         // A password (maybe just TMPMAIL_PASSWORD in the environment) only
@@ -508,7 +515,7 @@ impl App {
                 }
                 Err(e) if e.is_provider_failure() => {
                     self.warn(&format!("{e}, trying the next provider"));
-                    failures.push(e.to_string());
+                    failures.push((p.id(), e));
                 }
                 // A requested domain may belong to a later provider.
                 Err(e @ Error::DomainUnavailable { .. }) => unavailable.push(e.to_string()),
@@ -516,10 +523,36 @@ impl App {
             }
         }
         if !failures.is_empty() {
-            failures.extend(unavailable);
+            // Those that answered don't have the domain: only the
+            // unreachable ones might, so name them, not "all providers".
+            let all_unreachable = failures
+                .iter()
+                .all(|(_, e)| matches!(e, Error::Unreachable { .. }));
+            if let (Some(domain), false, true) =
+                (&opts.domain, unavailable.is_empty(), all_unreachable)
+            {
+                let ids: Vec<&str> = failures.iter().map(|(id, _)| *id).collect();
+                let why: Vec<String> = failures
+                    .iter()
+                    .map(|(id, e)| match e {
+                        Error::Unreachable { detail, .. } if ids.len() == 1 => detail.clone(),
+                        Error::Unreachable { detail, .. } => format!("{id}: {detail}"),
+                        e => e.to_string(),
+                    })
+                    .collect();
+                return Err(Error::Unreachable {
+                    provider: ids.join(", "),
+                    detail: format!(
+                        "{}; the other providers don't offer {domain:?}: {}",
+                        why.join("; "),
+                        unavailable.join("; ")
+                    ),
+                });
+            }
+            let errors: Vec<String> = failures.iter().map(|(_, e)| e.to_string()).collect();
             return Err(Error::Unreachable {
                 provider: "all providers".into(),
-                detail: failures.join("; "),
+                detail: errors.join("; "),
             });
         }
         // Every provider was up but none offers that domain: a usage error.
@@ -620,6 +653,31 @@ impl App {
             .0;
         Ok(())
     }
+}
+
+/// Refuses, with a hint, a domain that a provider the fallback won't try
+/// says is its own (Maildrop's: left out because its inboxes are public,
+/// and it can't be picked by domain), instead of asking every provider.
+fn check_left_out_domain(candidates: &[Box<dyn Provider>], domain: &str) -> Result<()> {
+    let probe = format!("x@{domain}");
+    let owner = provider::all()
+        .filter(|id| !candidates.iter().any(|c| c.id() == *id))
+        .filter_map(|id| provider::get(id).ok())
+        .find(|p| p.owns_address(&probe));
+    let Some(p) = owner else {
+        return Ok(());
+    };
+    let public = if p.caps().private {
+        ""
+    } else {
+        ", whose inboxes are public, so it is only used when asked for"
+    };
+    Err(Error::Usage(format!(
+        "{domain} belongs to {}{public}: choose the provider {} (`-p {}`)",
+        p.name(),
+        p.id(),
+        p.id()
+    )))
 }
 
 /// Asks every candidate for its domains at once and keeps those offering
@@ -876,6 +934,28 @@ mod tests {
             "in 30m"
         );
         assert_eq!(relative(now - chrono::Duration::days(3)), "3d ago");
+    }
+
+    #[test]
+    fn domains_and_names_are_checked_before_any_request() {
+        let app = App::for_test(std::env::temp_dir());
+        let new = |user: Option<&str>, domain: Option<&str>| {
+            let opts = CreateOpts {
+                user: user.map(String::from),
+                domain: domain.map(String::from),
+                password: None,
+            };
+            app.create_with_fallback(None, None, &opts)
+                .unwrap_err()
+                .to_string()
+        };
+        let maildrop = new(Some("me"), Some("maildrop.cc"));
+        assert!(maildrop.contains("`-p maildrop`"), "{maildrop}");
+        let upper = new(None, Some("MailDrop.cc"));
+        assert!(upper.contains("`-p maildrop`"), "{upper}");
+        assert!(maildrop.contains("public"), "{maildrop}");
+        assert_eq!(new(Some("foo"), Some("")), "the domain is empty");
+        assert_eq!(new(Some(" "), Some("x.com")), "the username is empty");
     }
 
     #[test]

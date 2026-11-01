@@ -70,7 +70,7 @@ Creates an address, saves it and makes it active. Alias: `generate`. Old flag: `
 |---|---|---|
 | `ADDRESS` | | Full address you want, e.g. `tmpmail new otter42@maxxspace.com`. Same as `-u otter42 -d maxxspace.com`. |
 | `--user NAME` | `-u` | The part before `@`. Random and readable by default (`quietotter482`). Only providers that allow choosing it are used: mail.tm, mail.gw, Guerrilla, Maildrop. |
-| `--domain DOMAIN` | `-d` | The part after `@`. See `tmpmail domains` for choices. tmpmail asks every provider for its domains at once and goes straight to one that has it, so `-d` works without `-p`. |
+| `--domain DOMAIN` | `-d` | The part after `@`. See `tmpmail domains` for choices. tmpmail asks every provider for its domains at once and goes straight to one that has it, so `-d` works without `-p`. If none that answered has it, that's exit 64; if some couldn't be reached, exit 3 names them. Maildrop's `maildrop.cc` is the exception: Maildrop is left out of the fallback (its inboxes are public), so `-d maildrop.cc` or `new NAME@maildrop.cc` asks you to add `-p maildrop` (exit 64; the MCP server's `create_inbox` and the apps ask for that provider too). An empty username or domain (`new foo@`) is a usage error too. |
 | `--provider ID` | `-p` | Use only this provider (no fallback): `mailtm`, `mailgw`, `dropmail`, `guerrilla`, `tempmail_lol`, `maildrop`. |
 | `--label NAME` | `-l` | A nickname for the inbox, used later with `-i NAME`. Example: `-l github`. Refused (exit 64, before anything is created) if another inbox already has it, or has it as its address or local part. |
 | `--password PW` | | Password for the mail.tm/mail.gw account, so you can log in later on the mail.tm website. Random by default. Also `TMPMAIL_PASSWORD`. |

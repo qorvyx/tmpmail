@@ -218,9 +218,8 @@ impl Input {
 }
 
 /// Checks `input`, then writes `config.toml` (only if a field changed) and
-/// `gui.json`. Returns the desktop settings now in force, and whether
-/// `config.toml` changed.
-pub fn save(input: &Input) -> Result<(Gui, bool), String> {
+/// `gui.json`. Returns the desktop settings now in force.
+pub fn save(input: &Input) -> Result<Gui, String> {
     input.check()?;
     let path = Config::path().ok_or("there is no config directory on this system")?;
     let (text, exists) = read_config(&path)?;
@@ -234,7 +233,7 @@ pub fn save(input: &Input) -> Result<(Gui, bool), String> {
     }
     let gui = input.gui();
     save_gui(&gui)?;
-    Ok((gui, changed))
+    Ok(gui)
 }
 
 fn read_config(path: &Path) -> Result<(String, bool), String> {

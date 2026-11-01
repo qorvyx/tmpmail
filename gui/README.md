@@ -97,12 +97,14 @@ preview on `gui-v*` tags; install steps are in the [main README](../README.md#de
   push setting and timeout without a restart, and the tray appears or goes. Environment
   variables that win over a field (`TMPMAIL_PROVIDER`, `TMPMAIL_POLL_INTERVAL`,
   `TMPMAIL_PUSH`, `TMPMAIL_HTTP_TIMEOUT`) are named under it. "Show in folder" reveals the
-  config file. Saving only restarts polling (and the push streams) when `config.toml`
-  changed. `http_timeout` is new in tmpmail 0.3.0. tmpmail 0.2.0 and earlier refuse unknown
-  config keys; 0.3.0 and later warn. So it is written only once the timeout is changed
-  from 20 s, and the screen says so. Unknown keys in `config.toml` show as an info notice
-  (`tmpmail: unknown key …, ignored`) at start, and after a save only for keys that are new
-  since the last load.
+  config file. Saving reads `config.toml` again (also when the form changed nothing in
+  it, since it may have been edited by hand), and restarts polling (and the push streams)
+  only when the poll interval, push or the timeout changed. `http_timeout` is new in
+  tmpmail 0.3.0. tmpmail 0.2.0 and earlier refuse unknown config keys; 0.3.0 and later
+  warn. So it is written only once the timeout is changed from 20 s, and the screen says
+  so. Unknown keys in `config.toml` show as an info notice (`tmpmail: unknown key …,
+  ignored`) at start (held until the window is ready, so it isn't lost; 0.1.3 lost it),
+  and after a save only for keys that are new since the last load.
 - **Look:** System / Light / Dark switch (remembered), resizable panes (remembered),
   keyboard focus rings, motion only on arrival of mail and dialogs, none with
   `prefers-reduced-motion`. The window opens at 1240×780, or smaller and centered when the

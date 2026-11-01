@@ -99,6 +99,7 @@ pub fn spawn(handle: AppHandle, shared: Arc<Shared>) -> Result<Sender<Req>, Stri
                     log,
                     last: HashMap::new(),
                     arrivals: Arrivals::default(),
+                    notices: Notices::default(),
                 },
             );
         })
@@ -119,6 +120,41 @@ struct Front {
     last: HashMap<String, Value>,
     /// New mail waiting for its notification.
     arrivals: Arrivals,
+    /// Notices from before the page listened.
+    notices: Notices,
+}
+
+/// Notices are events, and events sent before the page listens are lost:
+/// the config's warnings at start (an unknown key in `config.toml`) would
+/// never show. They are held until the page first asks for its data
+/// (`init`, `Req::Refresh`), then sent; the last [`HELD_NOTICES`] only, so a
+/// window that stays hidden long doesn't pile them up.
+const HELD_NOTICES: usize = 8;
+
+#[derive(Default)]
+struct Notices {
+    ready: bool,
+    held: Vec<Value>,
+}
+
+impl Notices {
+    /// The notice to send now, or `None` if it is held.
+    fn hold(&mut self, notice: Value) -> Option<Value> {
+        if self.ready {
+            return Some(notice);
+        }
+        if self.held.len() == HELD_NOTICES {
+            self.held.remove(0);
+        }
+        self.held.push(notice);
+        None
+    }
+
+    /// The page listens now: the held notices, to send.
+    fn ready(&mut self) -> Vec<Value> {
+        self.ready = true;
+        std::mem::take(&mut self.held)
+    }
 }
 
 impl Front {
@@ -130,10 +166,15 @@ impl Front {
 
     /// A toast in the window. Its text often quotes a provider's error, so
     /// it is cleaned here, once for every notice.
-    fn notice(&self, kind: &str, text: &str) {
-        let _ = self
-            .handle
-            .emit("notice", json!({ "kind": kind, "text": clean_line(text) }));
+    fn notice(&mut self, kind: &str, text: &str) {
+        let payload = json!({ "kind": kind, "text": clean_line(text) });
+        if let Some(payload) = self.notices.hold(payload) {
+            self.send_notice(&payload);
+        }
+    }
+
+    fn send_notice(&self, payload: &Value) {
+        let _ = self.handle.emit("notice", payload);
     }
 }
 
@@ -215,6 +256,9 @@ impl watcher::Front for Front {
     fn handle(&mut self, w: &mut Watcher, req: Req) -> bool {
         match req {
             Req::Refresh => {
+                for notice in self.notices.ready() {
+                    self.send_notice(&notice);
+                }
                 // Inboxes not listed yet are listed on their own soon.
                 for inbox in &w.app.state.inboxes {
                     if let Some(payload) = self.last.get(&inbox.address) {
@@ -630,6 +674,25 @@ fn capital(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notices_wait_for_the_page() {
+        let mut n = Notices::default();
+        assert_eq!(n.hold(json!("unknown key")), None);
+        assert_eq!(n.hold(json!("second")), None);
+        assert_eq!(n.ready(), [json!("unknown key"), json!("second")]);
+        assert_eq!(n.hold(json!("later")), Some(json!("later")));
+        // A reload of the page sends nothing twice.
+        assert!(n.ready().is_empty());
+        // Only the newest are kept.
+        let mut n = Notices::default();
+        for i in 0..20 {
+            n.hold(json!(i));
+        }
+        let held = n.ready();
+        assert_eq!(held.len(), HELD_NOTICES);
+        assert_eq!(held.last(), Some(&json!(19)));
+    }
 
     #[test]
     fn list_rows_get_the_senders_words_cleaned() {

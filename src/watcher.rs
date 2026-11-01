@@ -97,8 +97,10 @@ impl Watcher {
     }
 
     /// Uses a new config (the desktop app's settings) from now on: the poll
-    /// interval, push and the request timeout. The old poller's push
-    /// streams end, and every inbox is listed again on the next turn.
+    /// interval, push and the request timeout. When one of these changed,
+    /// the old poller's push streams end (and their back-off with them) and
+    /// every inbox is listed again on the next turn; otherwise polling goes
+    /// on as it was.
     /// Only unknown keys the last config didn't have are reported, so
     /// saving the settings doesn't repeat warnings already shown.
     pub fn set_config(&mut self, config: Config) {
@@ -106,7 +108,13 @@ impl Watcher {
         for w in config.new_warnings(&self.app.config) {
             self.app.note(&w);
         }
-        self.poller = Self::poller(&config);
+        let old = &self.app.config;
+        if config.poll_interval(None) != old.poll_interval(None)
+            || config.push() != old.push()
+            || config.http_timeout != old.http_timeout
+        {
+            self.poller = Self::poller(&config);
+        }
         self.app.config = config;
     }
 
@@ -505,6 +513,36 @@ mod tests {
 
         drop(req_tx);
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn polling_restarts_only_when_its_settings_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut w = Watcher::with_app(App::for_test(dir.path().to_path_buf()));
+        w.set_config(Config::parse("poll_interval = 60").unwrap());
+        w.poller.polled("a@x.com", true);
+        assert!(!w.poller.is_due("a@x.com"));
+        // A save that only adds a key (or changes the provider order) keeps
+        // the poller and its push streams.
+        w.set_config(
+            Config::parse("poll_interval = 60\nnewer = 1\nproviders = [\"mailgw\"]").unwrap(),
+        );
+        assert!(!w.poller.is_due("a@x.com"));
+        // A new interval, push setting or timeout starts over: every inbox
+        // is listed again.
+        let mut starts_over = |text: &str| {
+            w.poller.polled("a@x.com", true);
+            w.set_config(Config::parse(text).unwrap());
+            w.poller.is_due("a@x.com")
+        };
+        assert!(starts_over("poll_interval = 30"));
+        assert!(starts_over("poll_interval = 30\npush = false"));
+        assert!(starts_over(
+            "poll_interval = 30\npush = false\nhttp_timeout = 60"
+        ));
+        assert!(!starts_over(
+            "poll_interval = 30\npush = false\nhttp_timeout = 60"
+        ));
     }
 
     #[test]

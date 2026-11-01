@@ -404,11 +404,14 @@ pub fn save_settings(
     shared: State<'_, Arc<Shared>>,
     input: settings::Input,
 ) -> Result<(), String> {
-    let (gui, config_changed) = settings::save(&input)?;
+    let gui = settings::save(&input)?;
     *shared.gui.lock().expect("gui lock") = gui.clone();
-    // Only a changed config restarts polling (and the push streams). Without
-    // a worker (it couldn't start) there is nothing to reload.
-    if config_changed && shared.start_error.get().is_none() {
+    // The worker reads the file again even when the form changed nothing in
+    // it: it may have been edited by hand since (a new unknown key gets its
+    // notice). Polling (and the push streams) restart only if the poll
+    // interval, push or the timeout changed. Without a worker (it couldn't start) there
+    // is nothing to reload.
+    if shared.start_error.get().is_none() {
         send(&shared, Req::Reload)?;
     }
     tray::set(&app, &shared, gui.tray)

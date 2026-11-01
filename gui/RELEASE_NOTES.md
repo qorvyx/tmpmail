@@ -28,6 +28,11 @@ what breaks:
 - **Images aren't offered as links.** A mail's remote images were listed under Links, and a
   mail with no link at all showed a Google logo as "the likeliest verification link". An address
   the mail only loads isn't listed now, unless the mail also links to it.
+- **The notice about an unknown `config.toml` key shows.** It was sent before the window
+  listened, so only the terminal saw it; and a save that changed none of the form's fields
+  didn't read the file again, so a key added by hand went unnoticed. Notices are now held
+  until the window is ready, and every save reads the file again. Polling restarts only
+  when the poll interval, push or the timeout changed.
 
 ## What's new in 0.1.3
 

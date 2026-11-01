@@ -4,7 +4,7 @@ inbox, and a clearer error when a domain isn't offered. (Their TUI and MCP fixes
 to the app.) It is built on the same core as the `tmpmail` command-line tool (0.3.4) and
 shares its inboxes and `config.toml`.
 
-**This is a preview.** It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS
+It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS
 and on Windows. Please report
 what breaks:
 <https://github.com/qorvyx/tmpmail/issues>.

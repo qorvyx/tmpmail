@@ -1,8 +1,7 @@
 #!/usr/bin/env sh
 # Prints the Homebrew cask for a desktop app release, using the DMG's checksum
 # from its SHA256SUMS file. Meant for github.com/qorvyx/homebrew-tap as
-# Casks/tmpmail-desktop.rb once the app is out of pre-release; gui-release.yml
-# doesn't run it yet.
+# Casks/tmpmail-desktop.rb; gui-release.yml doesn't run it yet.
 #
 #   scripts/homebrew-cask.sh VERSION SHA256SUMS > tmpmail-desktop.rb
 set -eu

@@ -27,7 +27,7 @@ It uses free public mail services (mail.tm, DropMail, Guerrilla Mail and
 
 - [Install](#install)
 - [Quick start](#quick-start)
-- [Desktop app](#desktop-app-preview)
+- [Desktop app](#the-desktop-app)
 - [Guide](#guide)
 - [Scripts and CI](#in-a-script-or-ci)
 - [AI agents](#with-an-ai-agent)
@@ -135,7 +135,7 @@ The address you made last is the *active* one; every command uses it unless you
 In the full-screen view (`tmpmail tui`), mail shows up as it arrives, the code is
 highlighted, and `y` copies it. Press `?` for the keys.
 
-## Desktop app (preview)
+## The desktop app
 
 Rather have a window? The desktop app does the same with the same inboxes: it shows your
 mail live, puts the code in a big banner with a Copy button, shows HTML mail safely (light

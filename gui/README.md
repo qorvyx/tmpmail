@@ -1,11 +1,11 @@
 <p align="center"><img src="src/assets/logo.svg" alt="" width="72" height="72"></p>
 
-# tmpmail desktop app (preview)
+# tmpmail desktop app
 
 A Tauri 2 window on top of tmpmail's core library, with the same inboxes as the CLI (same
 `state.json` and config). Inboxes, live mail, the verification code one click (or `y`) away,
-a safe HTML preview in light or dark, and the TUI's actions and keys. Released as a
-preview on `gui-v*` tags; install steps are in the [main README](../README.md#desktop-app).
+a safe HTML preview in light or dark, and the TUI's actions and keys. Released on
+`gui-v*` tags; install steps are in the [main README](../README.md#desktop-app).
 
 ## Features
 
@@ -380,8 +380,8 @@ in `tauri.conf.json`:
    mounted with any license agreement answered, and a warning is printed if it has one).
 4. One publish job writes `SHA256SUMS`, attests every file
    (`gh attestation verify FILE --repo qorvyx/tmpmail --signer-workflow
-   qorvyx/tmpmail/.github/workflows/gui-release.yml`), and creates a **pre-release**
-   titled "tmpmail desktop X.Y.Z (preview)", never marked latest (the CLI's release stays
+   qorvyx/tmpmail/.github/workflows/gui-release.yml`), and creates a release
+   titled "tmpmail desktop X.Y.Z", never marked latest (the CLI's release stays
    the latest), with `RELEASE_NOTES.md` as its notes.
 
 Running the workflow by hand (`workflow_dispatch`) is a dry run: it builds and uploads the
@@ -390,7 +390,7 @@ installers as run artifacts, without a release. Files are named
 
 `scripts/homebrew-cask.sh VERSION SHA256SUMS` prints a cask (`tmpmail-desktop`) for the
 DMG, with a caveat explaining Open Anyway, for `qorvyx/homebrew-tap`. It isn't run in CI
-yet: the cask waits until the app is out of pre-release. No updater yet either: it would
+yet. No updater yet either: it would
 need its own minisign key, backed up before the first release that uses it.
 
 ## The preview probe

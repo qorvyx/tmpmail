@@ -1,5 +1,5 @@
 # Builds the desktop app's installers on a `gui-v*` tag and publishes them as
-# a GitHub pre-release with SHA256SUMS. Every file gets a build provenance
+# a GitHub release with SHA256SUMS. Every file gets a build provenance
 # attestation, checked with `gh attestation verify FILE --repo qorvyx/tmpmail
 # --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`.
 # Running it by hand (workflow_dispatch) only builds, as a dry run; the
@@ -209,12 +209,12 @@ jobs:
           subject-path: |
             dist/tmpmail-desktop-*
             dist/SHA256SUMS
-      # A pre-release, never marked latest: the CLI's releases stay the
-      # repository's latest release.
+      # Never marked latest: the CLI's releases stay the repository's latest
+      # release, so releases/latest and its download links lead to the CLI.
       - env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME" dist/*
-          --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --latest=false
-          --title "tmpmail desktop $VERSION (preview)"
+          --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false
+          --title "tmpmail desktop $VERSION"
           --notes-file gui/RELEASE_NOTES.md

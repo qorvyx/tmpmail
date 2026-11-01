@@ -196,7 +196,7 @@ shows which services support what.
 
 ```sh
 tmpmail new              # random, readable address, e.g. quickfox605@maxxspace.com
-tmpmail new -c           # same, and copy it to the clipboard
+tmpmail new -c           # same, and copy it to the clipboard (a failed copy only warns)
 tmpmail whoami           # show it again later
 ```
 

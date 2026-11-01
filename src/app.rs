@@ -545,14 +545,19 @@ impl App {
 
     #[cfg(feature = "cli")]
     /// Creates a fresh inbox to replace the selected one, with the same
-    /// provider if it works, and drops the old one unless `keep`. The caller
-    /// stores the new inbox.
-    pub(crate) fn replace_current(&mut self, keep: bool) -> Result<Inbox> {
+    /// provider if it works and its label. Returns it and the old inbox:
+    /// the caller stores and shows the new one, then calls
+    /// [`App::retire`] with the old one, so it is never gone before the
+    /// new address has been shown.
+    pub(crate) fn replace_current(&mut self) -> Result<(Inbox, Inbox)> {
         let old = self.current()?.clone();
         // Prefer the same provider, fall back like `new` does.
         let opts = CreateOpts::default();
-        let p = provider::get(&old.provider)?;
-        let mut inbox = match p.create(&opts).and_then(|i| checked_address(p.as_ref(), i)) {
+        let created = {
+            let p = self.provider(&old.provider)?;
+            p.create(&opts).and_then(|i| checked_address(p, i))
+        };
+        let mut inbox = match created {
             Ok(i) => i,
             Err(e) if e.is_provider_failure() => {
                 self.warn(&format!("{e}, trying other providers"));
@@ -561,17 +566,33 @@ impl App {
             Err(e) => return Err(e),
         };
         inbox.label = old.label.clone();
-        if !keep {
-            let _ = p.delete_inbox(&mut old.clone());
-            self.forget(&old.address)?;
-        } else if let Some(label) = &old.label {
-            // Storing the new inbox takes the label off the old one.
-            self.note(&format!(
-                "label {label:?} moves to the new inbox; {} keeps none",
-                old.address
-            ));
+        Ok((inbox, old))
+    }
+
+    #[cfg(feature = "cli")]
+    /// Drops the inbox a rotation replaced by `new` (already stored and
+    /// shown), unless `keep`; storing `new` has already taken its label.
+    /// The rotation itself worked, so a failure here only warns.
+    pub(crate) fn retire(&mut self, old: &Inbox, new: &Inbox, keep: bool) {
+        // A provider that handed out the same address again: nothing to drop.
+        if old.address.eq_ignore_ascii_case(&new.address) {
+            return;
         }
-        Ok(inbox)
+        if keep {
+            if let Some(label) = &old.label {
+                self.note(&format!(
+                    "label {label:?} moved to the new inbox; {} keeps none",
+                    old.address
+                ));
+            }
+            return;
+        }
+        if let Ok(p) = self.provider(&old.provider) {
+            let _ = p.delete_inbox(&mut old.clone());
+        }
+        if let Err(e) = self.forget(&old.address) {
+            self.warn(&format!("could not forget {}: {e}", old.address));
+        }
     }
 
     /// Removes a stored inbox (by exact address) from the state file.

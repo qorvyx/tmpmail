@@ -74,7 +74,7 @@ Creates an address, saves it and makes it active. Alias: `generate`. Old flag: `
 | `--provider ID` | `-p` | Use only this provider (no fallback): `mailtm`, `mailgw`, `dropmail`, `guerrilla`, `tempmail_lol`, `maildrop`. |
 | `--label NAME` | `-l` | A nickname for the inbox, used later with `-i NAME`. Example: `-l github`. Refused (exit 64, before anything is created) if another inbox already has it, or has it as its address or local part. |
 | `--password PW` | | Password for the mail.tm/mail.gw account, so you can log in later on the mail.tm website. Random by default. Also `TMPMAIL_PASSWORD`. |
-| `--copy` | `-c` | Also copy the new address to the clipboard. |
+| `--copy` | `-c` | Also copy the new address to the clipboard. If that fails (no clipboard tool, or it exits with an error), the address is still saved and printed, a warning goes to stderr, and the exit code stays 0. |
 
 ```sh
 tmpmail new                        # random address, first working provider
@@ -301,13 +301,13 @@ Deletes the inbox at the provider (where possible) and removes it from tmpmail.
 ### `rotate`: get a fresh address
 
 Creates a new address (same provider if it is up), keeps the old label, makes it active,
-and drops the old inbox. With `--keep`, the label moves to the new inbox and the old one keeps
+prints it, and only then drops the old inbox. With `--keep`, the label moves to the new inbox and the old one keeps
 none, so the label still picks one inbox.
 
 | Option | Short | Explanation |
 |---|---|---|
 | `--keep` | | Keep the old inbox instead of dropping it. |
-| `--copy` | `-c` | Copy the new address to the clipboard. |
+| `--copy` | `-c` | Copy the new address to the clipboard. A failed copy only warns, as in `new`. |
 
 ### `providers`: provider overview
 

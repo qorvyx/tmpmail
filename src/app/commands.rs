@@ -66,19 +66,30 @@ impl App {
         self.with_message(msg.id.as_deref(), |p, inbox, id| p.get(inbox, id))
     }
 
-    /// Stores `inbox` as the active one and prints it.
-    fn activate(&mut self, inbox: &Inbox, copy: bool) -> Result<()> {
+    /// Stores `inbox` as the active one and prints it, then copies it if
+    /// asked. A failed copy only warns: the inbox exists and its address
+    /// was printed. Returns whether it was copied.
+    fn activate(&mut self, inbox: &Inbox, copy: bool) -> Result<bool> {
         let added = inbox.clone();
         self.state = self.store.update(|s| s.add(added))?.0;
-        if copy {
-            system::copy(&inbox.address, self.clipboard_cmd().as_deref())?;
-        }
         if self.global.json {
             self.json_out(&self.view(inbox));
         } else {
             println!("{}", clean_line(&inbox.address));
         }
-        Ok(())
+        Ok(copy && self.copy_new_address(&inbox.address))
+    }
+
+    /// Copies a new address, warning when that fails.
+    fn copy_new_address(&self, address: &str) -> bool {
+        let _ = std::io::stdout().flush();
+        match system::copy(address, self.clipboard_cmd().as_deref()) {
+            Ok(()) => true,
+            Err(e) => {
+                self.warn(&format!("could not copy the address: {e:#}"));
+                false
+            }
+        }
     }
 
     // ---------- commands ----------
@@ -107,7 +118,7 @@ impl App {
         let mut inbox = self.create_with_fallback(a.provider.as_deref(), None, &opts)?;
         inbox.label = a.label;
         let p = provider::get(&inbox.provider)?;
-        self.activate(&inbox, a.copy)?;
+        let copied = self.activate(&inbox, a.copy)?;
         if !self.global.json {
             if !p.caps().private {
                 self.warn(&format!(
@@ -116,7 +127,7 @@ impl App {
                 ));
             }
             let mut info = format!("via {} ({})", p.name(), p.caps().lifetime);
-            if a.copy {
+            if copied {
                 info.push_str(", copied to clipboard");
             }
             self.note(&info);
@@ -720,19 +731,14 @@ impl App {
     /// `watch --rotate`: replaces the watched inbox with a fresh one, makes
     /// it active and announces it. Returns the new inbox's index.
     fn watch_rotate(&mut self, a: &WatchArgs, poller: &mut Poller) -> Result<usize> {
-        let old = self.current()?.address.clone();
-        let inbox = self.replace_current(a.keep)?;
+        let (inbox, old_inbox) = self.replace_current()?;
+        let old = old_inbox.address.clone();
         let added = inbox.clone();
         self.state = self.store.update(|s| s.add(added))?.0;
         // `-i` named the old inbox; from now on follow the active one.
         self.global.inbox = None;
         poller.forget(&old);
         let address = clean_line(&inbox.address);
-        if a.copy {
-            if let Err(e) = system::copy(&inbox.address, self.clipboard_cmd().as_deref()) {
-                self.warn(&format!("could not copy the new address: {e:#}"));
-            }
-        }
         if self.global.json {
             println!(
                 "{}",
@@ -741,9 +747,13 @@ impl App {
         } else {
             println!("{} {}", self.green("new address:"), self.bold(&address));
         }
+        if a.copy {
+            self.copy_new_address(&inbox.address);
+        }
         if a.notify {
             system::notify("tmpmail: new address", &address);
         }
+        self.retire(&old_inbox, &inbox, a.keep);
         self.state
             .position(&inbox.address)
             .ok_or_else(|| Error::NotFound(format!("{address} vanished from the state file")))
@@ -995,7 +1005,7 @@ impl App {
             let n = self.state.position(&inbox.address)?;
             self.state.inboxes[n].label.clone()
         });
-        self.activate(&inbox, false)
+        self.activate(&inbox, false).map(|_| ())
     }
 
     fn drop_inbox(&mut self, a: DropArgs) -> Result<()> {
@@ -1021,8 +1031,10 @@ impl App {
     }
 
     fn rotate(&mut self, a: RotateArgs) -> Result<()> {
-        let inbox = self.replace_current(a.keep)?;
-        self.activate(&inbox, a.copy)
+        let (inbox, old) = self.replace_current()?;
+        self.activate(&inbox, a.copy)?;
+        self.retire(&old, &inbox, a.keep);
+        Ok(())
     }
 
     fn providers(&mut self, a: ProvidersArgs) -> Result<()> {
@@ -1225,7 +1237,7 @@ mod tests {
             Ok(Vec::new())
         }
         fn create(&self, _: &CreateOpts) -> Result<Inbox> {
-            unimplemented!()
+            Ok(Inbox::new("fake", "n@x.com".into(), Value::Null))
         }
         fn list(&self, _: &mut Inbox) -> Result<Vec<Summary>> {
             Ok(self
@@ -1306,6 +1318,45 @@ mod tests {
             err.to_string().contains("would also match a@x.com"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn a_failed_copy_keeps_the_new_inbox_and_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_test(dir.path().to_path_buf());
+        app.global.clipboard_cmd = Some("false".into());
+        let inbox = Inbox::new("guerrilla", "n@x.com".into(), Value::Null);
+        assert!(!app.activate(&inbox, true).unwrap(), "not copied");
+        let stored = app.store.load().unwrap();
+        assert_eq!(stored.active.as_deref(), Some("n@x.com"));
+        #[cfg(unix)]
+        {
+            app.global.clipboard_cmd = Some("cat".into());
+            assert!(app.activate(&inbox, true).unwrap());
+        }
+    }
+
+    #[test]
+    fn rotate_stores_the_new_inbox_before_dropping_the_old() {
+        for keep in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut app = app_with(dir.path(), Fixed { mail: Vec::new() });
+            app.state = app
+                .store
+                .update(|s| s.inboxes[0].label = Some("work".into()))
+                .unwrap()
+                .0;
+            app.global.clipboard_cmd = Some("false".into());
+            app.run(Command::Rotate(RotateArgs { keep, copy: true }))
+                .unwrap();
+            let s = app.store.load().unwrap();
+            assert_eq!(s.active.as_deref(), Some("n@x.com"));
+            assert_eq!(
+                s.resolve(Some("work")).unwrap(),
+                s.position("n@x.com").unwrap()
+            );
+            assert_eq!(s.position("a@x.com").is_some(), keep);
+        }
     }
 
     #[test]

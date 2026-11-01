@@ -28,7 +28,9 @@ static CODE: LazyLock<Regex> =
 /// Returns candidates best-first. An empty list means nothing looked like a code.
 pub fn otp_candidates(subject: &str, body: &str) -> Vec<Candidate> {
     let mut out: Vec<Candidate> = Vec::new();
+    let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (text, bonus) in [(subject, 3), (body, 0)] {
+        let text = head(text, MAX_SCAN);
         for m in CODE.find_iter(text) {
             let raw = m.as_str();
             let code: String = raw.chars().filter(|c| !matches!(c, ' ' | '-')).collect();
@@ -93,9 +95,12 @@ pub fn otp_candidates(subject: &str, body: &str) -> Vec<Candidate> {
                 score -= 4; // part of a domain or version number
             }
 
-            match out.iter_mut().find(|c| c.code == code) {
-                Some(existing) => existing.score = existing.score.max(score) + 1,
-                None => out.push(Candidate { code, score }),
+            match at.get(&code) {
+                Some(&i) => out[i].score = out[i].score.max(score) + 1,
+                None => {
+                    at.insert(code.clone(), out.len());
+                    out.push(Candidate { code, score });
+                }
             }
         }
     }
@@ -122,6 +127,28 @@ pub fn otp(subject: &str, body: &str, custom: Option<&Regex>) -> Option<String> 
         .into_iter()
         .next()
         .map(|c| c.code)
+}
+
+/// How much of a text is searched for codes and links: far more than any
+/// real mail's text, so a sender's megabytes of filler cost no more.
+const MAX_SCAN: usize = 1 << 20;
+
+/// The first `max` bytes of `text`, cut at a space before that (so no link
+/// or code is cut in two), or on a character boundary if there is none
+/// near.
+fn head(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut cut = max;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let near = window_before(text, cut, 4096);
+    let end = near
+        .rfind(|c: char| c.is_whitespace() || c == '<')
+        .map_or(cut, |i| cut - near.len() + i);
+    &text[..end]
 }
 
 fn window_before(text: &str, end: usize, len: usize) -> &str {
@@ -168,6 +195,7 @@ static NOISE_WORDS: LazyLock<Regex> = LazyLock::new(|| {
 /// `url(...)`) isn't a link a reader would open: it is left out, also when
 /// the text body repeats it, unless something links to it (`href`).
 pub fn links(text: &str, html: &str) -> Vec<String> {
+    let (text, html) = (head(text, MAX_SCAN), head(html, 4 * MAX_SCAN));
     let mut found: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     // Where the hrefs are: the scan of the HTML for bare URLs skips them,
@@ -194,7 +222,12 @@ pub fn links(text: &str, html: &str) -> Vec<String> {
         loaded.extend(urls.into_iter().map(normalized_url));
     }
     loaded.retain(|u| !seen.contains(u));
-    let in_href = |at: usize| hrefs.iter().any(|r| r.contains(&at));
+    // The hrefs come in order and don't overlap: a binary search finds the
+    // one an offset could be in.
+    let in_href = |at: usize| {
+        let i = hrefs.partition_point(|r| r.start <= at);
+        i > 0 && hrefs[i - 1].contains(&at)
+    };
     let bare = URL
         .find_iter(html)
         .filter(|m| !in_href(m.start()))
@@ -348,7 +381,8 @@ pub fn is_web_link(s: &str) -> bool {
     })
 }
 
-/// Adds `url` to `list` unless it has it already.
+/// Adds `url` to `list` unless it has it already (linear in the list; for
+/// a long list, keep a `HashSet` beside it).
 pub fn push_new(list: &mut Vec<String>, url: String) {
     if !list.contains(&url) {
         list.push(url);
@@ -530,5 +564,38 @@ curl https://evil.example/y">x</a>
             assert!(l.iter().any(|u| u == kept), "{kept}: {l:?}");
         }
         assert_eq!(l[0], "https://example.com/verify?t=1&u=2");
+    }
+
+    #[test]
+    fn many_codes_and_links_stay_fast() {
+        // Security review A3: 560 KB of distinct codes took 10 s, 1.4 MB of
+        // distinct links 8 s (release builds); generous bounds for debug.
+        let codes: String = (0..80_000)
+            .map(|i| format!("{:06} ", 100_000 + i))
+            .collect();
+        let t = std::time::Instant::now();
+        let _ = otp_candidates("", &codes);
+        assert!(t.elapsed().as_secs() < 10, "otp {:?}", t.elapsed());
+        let urls: String = (0..40_000)
+            .map(|i| format!("https://x.example/{i} "))
+            .collect();
+        let html: String = (0..20_000)
+            .map(|i| format!("<a href=\"https://y.example/{i}\">x</a>"))
+            .collect();
+        let t = std::time::Instant::now();
+        let l = links(&urls, &html);
+        assert!(t.elapsed().as_secs() < 10, "links {:?}", t.elapsed());
+        assert!(l.len() > 50_000);
+    }
+
+    #[test]
+    fn a_link_at_the_scan_limit_is_not_cut() {
+        let filler = "x ".repeat((MAX_SCAN - 10) / 2);
+        let text = format!("{filler}https://bank.example/reset?token=abcdef0123456789 end");
+        assert!(
+            links(&text, "").is_empty(),
+            "past the limit: left out, not cut"
+        );
+        assert!(head("\u{e9}\u{e9}\u{e9}", 3).len() <= 3);
     }
 }

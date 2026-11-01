@@ -173,8 +173,125 @@ pub(crate) fn is_invisible(c: char) -> bool {
     matches!(c, '\u{200C}' | '\u{200D}' | '\u{E0000}'..='\u{E007F}') || is_hidden_format(c)
 }
 
+/// The largest HTML body parsed (sanitized or turned into text): far more
+/// than real mail, whose providers cut much smaller.
+pub const MAX_HTML: usize = 4 << 20;
+
+/// The deepest nesting of elements parsed. The HTML parsers take seconds
+/// per few thousand levels past this (a sender's 100 000 nested `<div>`
+/// took 40 s), and no real mail nests more than a few dozen.
+pub const MAX_HTML_DEPTH: usize = 1000;
+
+/// The note above the plain text shown instead of an HTML body too large or
+/// too deeply nested to parse.
+pub const HTML_TOO_LARGE: &str = "This message's HTML is too large or too deeply nested to \
+     show as it was sent: here is its text, without the layout.";
+
+/// Whether `html` is past [`MAX_HTML`] or nests elements deeper than
+/// [`MAX_HTML_DEPTH`]. Counted by a linear scan that reads tags as the HTML
+/// parser does where it matters for depth: a tag starts with `<` and a
+/// letter; comments, attribute values and the text of `script`, `style`,
+/// `textarea` and `title` hold no tags; `/>` doesn't close an HTML element;
+/// an end tag closes only an element that is open (and those opened inside
+/// it); void elements (`<br>`) and ones the parser closes on its own (`<p>`,
+/// `<li>`, `<td>`...) don't count.
+pub fn html_too_large(html: &str) -> bool {
+    if html.len() > MAX_HTML {
+        return true;
+    }
+    const UNCOUNTED: [&str; 26] = [
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+        "source", "track", "wbr", "p", "li", "dt", "dd", "tr", "td", "th", "option", "optgroup",
+        "thead", "tbody", "tfoot",
+    ];
+    const RAW_TEXT: [&str; 5] = ["script", "style", "textarea", "title", "xmp"];
+    let bytes = html.as_bytes();
+    let lower_eq = |a: &[u8], b: &str| a.eq_ignore_ascii_case(b.as_bytes());
+    let mut open: Vec<&[u8]> = Vec::new();
+    let mut i = 0;
+    while let Some(off) = bytes[i..].iter().position(|&b| b == b'<') {
+        i += off + 1;
+        if bytes[i..].starts_with(b"!--") {
+            i = find(bytes, i + 3, b"-->").map_or(bytes.len(), |e| e + 3);
+            continue;
+        }
+        let close = bytes.get(i) == Some(&b'/');
+        let start = i + usize::from(close);
+        if !bytes.get(start).is_some_and(u8::is_ascii_alphabetic) {
+            continue;
+        }
+        let end = bytes[start..]
+            .iter()
+            .position(|b| !b.is_ascii_alphanumeric() && *b != b'-')
+            .map_or(bytes.len(), |e| start + e);
+        let name = &bytes[start..end];
+        // The rest of the tag, to its `>` outside quotes.
+        let mut j = end;
+        let mut quote = None;
+        while j < bytes.len() {
+            match (quote, bytes[j]) {
+                (None, b'>') => break,
+                (None, q @ (b'"' | b'\'')) => quote = Some(q),
+                (Some(q), c) if c == q => quote = None,
+                _ => {}
+            }
+            j += 1;
+        }
+        i = j;
+        if UNCOUNTED.iter().any(|t| lower_eq(name, t)) {
+            continue;
+        }
+        if close {
+            if let Some(k) = open.iter().rposition(|n| n.eq_ignore_ascii_case(name)) {
+                open.truncate(k);
+            }
+            continue;
+        }
+        if let Some(raw) = RAW_TEXT.iter().find(|t| lower_eq(name, t)) {
+            // Its text runs to its own end tag.
+            let mut k = i;
+            i = loop {
+                match find(bytes, k, b"</") {
+                    Some(e)
+                        if bytes.len() >= e + 2 + raw.len()
+                            && lower_eq(&bytes[e + 2..e + 2 + raw.len()], raw) =>
+                    {
+                        break e;
+                    }
+                    Some(e) => k = e + 2,
+                    None => break bytes.len(),
+                }
+            };
+            continue;
+        }
+        open.push(name);
+        if open.len() > MAX_HTML_DEPTH {
+            return true;
+        }
+    }
+    false
+}
+
+/// Where `needle` first is in `hay` from `from` on.
+fn find(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+    hay.get(from..)?
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .map(|p| from + p)
+}
+
+/// The text of an HTML body too large or deep to parse: its tags removed,
+/// after the note saying so.
+fn too_large_text(html: &str) -> String {
+    format!("{HTML_TOO_LARGE}\n\n{}", strip_tags(html))
+}
+
 /// Plain-text rendering of an HTML body, without loading anything remote.
+/// Past [`html_too_large`], its text without tags after [`HTML_TOO_LARGE`].
 pub fn html_to_text(html: &str, width: usize) -> String {
+    if html_too_large(html) {
+        return too_large_text(html);
+    }
     html2text::from_read(html.as_bytes(), width.max(20)).unwrap_or_else(|_| strip_tags(html))
 }
 
@@ -246,6 +363,9 @@ pub fn sanitize_mail_html(html: &str, allow_remote_images: bool, frame: Option<&
 /// The ids of the `cid:` images (`<img src="cid:ID">`) an HTML body shows,
 /// as the sanitizer reads them, each once ([`crate::provider::cid_of_url`]).
 pub fn cid_images(html: &str) -> Vec<String> {
+    if html_too_large(html) {
+        return Vec::new();
+    }
     let found = std::sync::Arc::new(std::sync::Mutex::new((Vec::new(), HashSet::new())));
     let list = found.clone();
     let mut builder = ammonia::Builder::default();
@@ -271,6 +391,12 @@ fn sanitize(
     frame: Option<&Frame>,
     inline: &HashMap<String, String>,
 ) -> String {
+    if html_too_large(html) {
+        return format!(
+            "<pre style=\"white-space:pre-wrap\">{}</pre>",
+            escape_html(&too_large_text(html))
+        );
+    }
     let inline = inline.clone();
     // Each `<img src="cid:...">` gets its own copy of the image's `data:`
     // URL, so one image shown a thousand times would make a copy a thousand
@@ -1245,5 +1371,43 @@ mod tests {
         assert!(out.contains('\u{e9}'), "plain letters stay: {out}");
         let back: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(back["subject"], subject);
+    }
+
+    #[test]
+    fn deeply_nested_html_is_not_parsed() {
+        // Security review A4: 100 000 nested `<div>` (500 KB) took 40 s.
+        let deep = "<div>".repeat(100_000);
+        let t = std::time::Instant::now();
+        assert!(html_to_text(&deep, 80).starts_with(HTML_TOO_LARGE));
+        assert!(sanitize_mail_html(&deep, false, None).contains("too large"));
+        // The shapes that fooled a first, cruder count: `/>` doesn't
+        // close a div, an end tag of nothing open closes nothing, and
+        // comments and attribute values hold no tags.
+        for trick in [
+            "<div/>",
+            "<div></x>",
+            "<div><!--</x>-->",
+            "<div title=\"</a>\">",
+        ] {
+            assert!(html_too_large(&trick.repeat(2000)), "{trick}");
+        }
+        // Text with `<` that isn't a tag, script text and void elements
+        // don't count.
+        assert!(!html_too_large(&"a 1<2 b I <3 you ".repeat(5000)));
+        assert!(!html_too_large(&format!(
+            "<script>{}</script>",
+            "<div>".repeat(5000)
+        )));
+        assert!(cid_images(&deep).is_empty());
+        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+        // A long ordinary mail is shown.
+        let long = "<p>line<br><table><tr><td>a<td>b</table>".repeat(20_000);
+        assert!(!html_too_large(&long));
+        assert!(!html_too_large(&"<div>x</div>".repeat(100_000)));
+        assert!(html_too_large(&"x".repeat(MAX_HTML + 1)));
+        // Unclosed tags with no `>` don't make the scan quadratic.
+        let t = std::time::Instant::now();
+        let _ = html_too_large(&"<a".repeat(1_000_000));
+        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
     }
 }

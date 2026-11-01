@@ -1178,14 +1178,25 @@ fn fit(s: &str, cells: usize) -> String {
     if width(s) <= cells {
         return s.to_string();
     }
-    let mut out = String::new();
+    // One pass, adding what each character adds to the width: measured with
+    // the one before it, since a pair can be wider than its parts (an emoji
+    // and the selector that makes it wide). A subject of a thousand marks
+    // costs no more than its length.
+    let (mut out, mut used, mut prev) = (String::new(), 0, None::<char>);
     for c in s.chars() {
-        let mut next = out.clone();
-        next.push(c);
-        if width(&next) + 1 > cells {
+        let w = match prev {
+            Some(p) => {
+                let pair: String = [p, c].iter().collect();
+                width(&pair).saturating_sub(width(p.encode_utf8(&mut [0; 4])))
+            }
+            None => width(c.encode_utf8(&mut [0; 4])),
+        };
+        if used + w + 1 > cells {
             break;
         }
-        out = next;
+        used += w;
+        out.push(c);
+        prev = Some(c);
     }
     if cells > 0 {
         out.push('…');
@@ -1763,5 +1774,20 @@ mod tests {
 
         press(&mut ui, &mut app, KeyCode::Char('n'));
         assert!(matches!(rx.try_recv(), Ok(Req::Create(None))));
+    }
+
+    #[test]
+    fn fitting_a_long_subject_is_linear() {
+        // Security review B5: 8000 combining marks took 1.8 s per frame.
+        let subject = format!("a{}{}", "\u{301}".repeat(32_000), "B".repeat(300));
+        let t = std::time::Instant::now();
+        let out = fit(&subject, 80);
+        assert!(t.elapsed().as_millis() < 1000, "{:?}", t.elapsed());
+        assert!(out.ends_with('\u{2026}') && out.contains('B'));
+        assert_eq!(fit("short", 80), "short");
+        assert_eq!(fit("abcdef", 4), "abc\u{2026}");
+        // An emoji made wide by its selector counts two cells.
+        let wide = fit(&"\u{263A}\u{FE0F}".repeat(60), 41);
+        assert_eq!(Span::raw(wide.as_str()).width(), 41, "{wide}");
     }
 }

@@ -83,6 +83,9 @@ what breaks:
   `//host` addresses are dropped (with "Load images" on they reached the app's own mail
   scheme), a style loads only `https:` (and inline) images, and `data:` stays only as an
   inline picture.
+- **Security: hostile mail can't stall the app.** HTML past 4 MiB or nested deeper than
+  1000 elements is shown as its plain text, under a note, instead of being parsed (100 000
+  nested `<div>` took 40 s), and codes and links are found in linear time.
 
 ## What's new in 0.1.3
 

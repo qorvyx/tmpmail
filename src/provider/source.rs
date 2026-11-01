@@ -158,6 +158,9 @@ fn headers(head: &[u8]) -> Vec<(String, String)> {
     out
 }
 
+/// The most parameters read from one header.
+const MAX_PARAMS: usize = 256;
+
 /// `type/subtype; a=1; b="2"` as the value and its parameters. RFC 2231
 /// parameters (`filename*=utf-8''r%C3%A9sum%C3%A9.txt`, or split as
 /// `filename*0*=...; filename*1*=...`) are put back together and decoded.
@@ -166,11 +169,20 @@ fn value_and_params(header: &str) -> (String, Vec<(String, String)>) {
     let value = pieces.next().unwrap_or_default().trim().to_string();
     let mut plain: Vec<(String, String)> = Vec::new();
     let mut extended: Vec<(String, u32, bool, String)> = Vec::new();
-    for piece in pieces {
+    for (n, piece) in pieces.enumerate() {
         let Some((k, v)) = piece.split_once('=') else {
             continue;
         };
         let k = k.trim().to_ascii_lowercase();
+        // More than any real header has: past them, only the names tmpmail
+        // reads are kept.
+        if n >= MAX_PARAMS
+            && !["boundary", "charset", "name", "filename"]
+                .iter()
+                .any(|w| k.split('*').next() == Some(*w))
+        {
+            continue;
+        }
         let v = unquote(v.trim());
         match k.split_once('*') {
             None => plain.push((k, v)),
@@ -195,16 +207,16 @@ fn value_and_params(header: &str) -> (String, Vec<(String, String)>) {
             }
             text = String::from_utf8_lossy(&percent_decode(&text)).into_owned();
         }
-        match joined.iter_mut().find(|(k, _)| *k == name) {
-            Some((_, v)) => v.push_str(&text),
-            None => joined.push((name, text)),
+        // Sorted, so the pieces of one name are next to each other.
+        match joined.last_mut() {
+            Some((k, v)) if *k == name => v.push_str(&text),
+            _ => joined.push((name, text)),
         }
     }
     // An RFC 2231 value wins over a plain one of the same name.
-    for (k, v) in joined {
-        plain.retain(|(p, _)| *p != k);
-        plain.push((k, v));
-    }
+    let names: std::collections::HashSet<&str> = joined.iter().map(|(k, _)| k.as_str()).collect();
+    plain.retain(|(p, _)| !names.contains(p.as_str()));
+    plain.extend(joined);
     (value, plain)
 }
 
@@ -547,5 +559,30 @@ Content-ID: <evil@x>\r\n\
         }
         let deep = "Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\n".repeat(50);
         let _ = parts(deep.as_bytes());
+    }
+
+    #[test]
+    fn many_mime_parameters_stay_fast() {
+        // Security review A3: a 429 KB header of distinct `aN*=x` took 3-4 s.
+        let header = format!(
+            "multipart/related; boundary=b{}",
+            (0..40_000)
+                .map(|i| format!("; a{i}*=x"))
+                .collect::<String>()
+        );
+        let t = std::time::Instant::now();
+        let (value, params) = value_and_params(&header);
+        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
+        assert_eq!(value, "multipart/related");
+        assert!(params.len() <= MAX_PARAMS);
+        assert!(params.iter().any(|(k, v)| k == "boundary" && v == "b"));
+        // A name tmpmail reads, past the limit, is still read.
+        let late = format!("{header}; charset=utf-8");
+        assert!(
+            value_and_params(&late)
+                .1
+                .iter()
+                .any(|(k, _)| k == "charset")
+        );
     }
 }

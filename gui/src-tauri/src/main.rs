@@ -274,13 +274,15 @@ impl Mails {
         // Links as the browser gets them: parsed, so what is shown, copied
         // and opened is the same ASCII text (punycode hosts, escaped paths)
         // and can't hide bidi or invisible characters.
-        let mut links = Vec::new();
+        let (mut links, mut seen) = (Vec::new(), HashSet::new());
         for l in extract::links(
             msg.text.as_deref().unwrap_or_default(),
             msg.html.as_deref().unwrap_or_default(),
         ) {
-            if let Some(url) = commands::web_url(&l) {
-                extract::push_new(&mut links, url.to_string());
+            if let Some(url) = commands::web_url(&l)
+                && seen.insert(url.to_string())
+            {
+                links.push(url.to_string());
             }
         }
         Mail {

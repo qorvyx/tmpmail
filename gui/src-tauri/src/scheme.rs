@@ -13,7 +13,7 @@
 
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, UriSchemeResponder};
-use tmpmail::provider::{Attachment, Message};
+use tmpmail::provider::Message;
 use tmpmail::render::{Frame, escape_html, has_own_colors, sanitize_mail_html};
 
 use crate::Shared;
@@ -197,6 +197,9 @@ pub fn handle(
             let (Ok(key), Some(cid)) = (key.parse::<u64>(), percent_decode(cid)) else {
                 return responder.respond(not_found());
             };
+            // The mail's own `cid:` URL is percent-encoded too (RFC 2392):
+            // `a%40b` means the part `<a@b>`.
+            let cid = tmpmail::provider::cid_of_url(&cid);
             let cached = {
                 let mails = shared.mails.lock().expect("mails lock");
                 match mails.get(key) {
@@ -325,43 +328,6 @@ pub fn not_found() -> Response<Vec<u8>> {
     status(StatusCode::NOT_FOUND)
 }
 
-/// The attachment a `cid:` reference most likely means, and the image type
-/// to serve it as. Providers don't report Content-ID headers, so this
-/// matches the attachment id or file name against the cid or its part
-/// before `@`.
-pub fn find_inline<'a>(msg: &'a Message, cid: &str) -> Option<(&'a Attachment, String)> {
-    let short = cid.split('@').next().unwrap_or(cid);
-    msg.attachments
-        .iter()
-        .filter(|a| [cid, short].iter().any(|c| a.id == *c || a.filename == *c))
-        .find_map(|a| Some((a, inline_type(a)?)))
-}
-
-/// The raster image type an inline attachment is served as: its own, or
-/// for `application/octet-stream` one known from its file extension. Never
-/// SVG (it can carry script) and never anything that isn't an image.
-fn inline_type(a: &Attachment) -> Option<String> {
-    let ct = a.content_type.split(';').next().unwrap_or_default();
-    let ct = ct.trim().to_ascii_lowercase();
-    if ct.starts_with("image/") {
-        return (!ct.contains("svg")).then_some(ct);
-    }
-    if ct != "application/octet-stream" {
-        return None;
-    }
-    let ext = a.filename.rsplit_once('.')?.1.to_ascii_lowercase();
-    let mime = match ext.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "bmp" => "image/bmp",
-        "avif" => "image/avif",
-        _ => return None,
-    };
-    Some(mime.to_string())
-}
-
 fn percent_decode(s: &str) -> Option<String> {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -382,6 +348,7 @@ fn percent_decode(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tmpmail::provider::Attachment;
 
     #[test]
     fn cid_ids_round_trip() {
@@ -411,7 +378,9 @@ mod tests {
             ],
             ..Default::default()
         };
-        let find = |cid: &str| find_inline(&msg, cid).map(|(a, t)| (a.filename.clone(), t));
+        let find = |cid: &str| {
+            tmpmail::provider::inline_attachment(&msg, cid).map(|(a, t)| (a.filename.clone(), t))
+        };
         assert_eq!(
             find("logo.png@x"),
             Some(("logo.png".into(), "image/png".into()))

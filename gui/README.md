@@ -34,6 +34,11 @@ preview on `gui-v*` tags; install steps are in the [main README](../README.md#de
   - From (copy the sender's address), to and date.
   - Load images (remote images, over **https only**), Original colors in dark mode, and
     Source (the raw message where the provider has it, else the HTML).
+  - Inline images (`cid:`) show without Load images: the attachment the provider lists
+    under that name, else, where the provider has the raw message (mail.tm, mail.gw,
+    DropMail, Maildrop), the part with that `Content-ID` in it. mail.tm lists an inline
+    image only by its file name, so in 0.1.3 its inline images showed only their alt
+    text.
   - Attachments with name, type and size, and Save (a native save dialog; never overwrites
     an existing file). On Linux and macOS an attachment can also be dragged out by its grip
     to a folder or another app (see "Dragging attachments out").
@@ -339,7 +344,8 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    images are off; the CLI's `read --html` output is unchanged.
 2. It is served by the `tmpmail-mail` URI scheme with its own CSP header (no scripts, images
    only inline or from the scheme, `https:` only after "Load images"; the sanitizer drops
-   plain `http:` images). Inline `cid:` images are served only as raster image types, never
+   plain `http:` images). Inline `cid:` images (from the provider's attachment, or decoded
+   from the raw source) are served only as raster image types, never
    SVG. The source view goes through the same scheme as escaped text, under a CSP with no
    images at all.
 3. It is shown in `<iframe sandbox="allow-popups">`: no scripts, an opaque origin, no IPC.

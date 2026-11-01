@@ -1,7 +1,7 @@
 //! Turning untrusted mail content into something safe to print or open.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Removes what could rewrite the user's terminal or disguise the text:
 /// terminal escape sequences (CSI and OSC sequences and the other ESC
@@ -160,7 +160,19 @@ pub fn body_text(text: Option<&str>, html: Option<&str>, width: usize) -> String
 /// [`sanitize_mail_html`]'s body in a document whose meta CSP blocks scripts
 /// and (unless `allow_remote_images`) remote images, with no referrer.
 pub fn safe_html_document(subject: &str, html: &str, allow_remote_images: bool) -> String {
-    let body = sanitize_mail_html(html, allow_remote_images, None);
+    safe_html_document_inline(subject, html, allow_remote_images, &HashMap::new())
+}
+
+/// [`safe_html_document`] with the `cid:` images `inline` has a URL for
+/// (by [`crate::provider::cid_of_url`]'s id; `data:` URLs, which the
+/// document's policy allows) pointing at it. The others stay as they are.
+pub fn safe_html_document_inline(
+    subject: &str,
+    html: &str,
+    allow_remote_images: bool,
+    inline: &HashMap<String, String>,
+) -> String {
+    let body = sanitize(html, allow_remote_images, None, inline);
     let img_src = if allow_remote_images {
         "data: cid: https: http:"
     } else {
@@ -192,6 +204,38 @@ pub struct Frame<'a> {
 /// `http:` images are dropped even when remote images are allowed (the
 /// frame's policy would block them anyway).
 pub fn sanitize_mail_html(html: &str, allow_remote_images: bool, frame: Option<&Frame>) -> String {
+    sanitize(html, allow_remote_images, frame, &HashMap::new())
+}
+
+/// The ids of the `cid:` images (`<img src="cid:ID">`) an HTML body shows,
+/// as the sanitizer reads them, each once ([`crate::provider::cid_of_url`]).
+pub fn cid_images(html: &str) -> Vec<String> {
+    let found = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let list = found.clone();
+    let mut builder = ammonia::Builder::default();
+    builder
+        .url_schemes(HashSet::from(["cid"]))
+        .attribute_filter(move |element, attribute, value| {
+            if let ("img", "src", Some(id)) = (element, attribute, value.strip_prefix("cid:")) {
+                let id = crate::provider::cid_of_url(id);
+                let mut list = list.lock().expect("cid list");
+                if !list.contains(&id) {
+                    list.push(id);
+                }
+            }
+            Some(Cow::Borrowed(value))
+        });
+    builder.clean(html);
+    std::mem::take(&mut *found.lock().expect("cid list"))
+}
+
+fn sanitize(
+    html: &str,
+    allow_remote_images: bool,
+    frame: Option<&Frame>,
+    inline: &HashMap<String, String>,
+) -> String {
+    let inline = inline.clone();
     let mut builder = ammonia::Builder::default();
     builder
         .add_generic_attributes(["style", "align", "bgcolor", "width", "height"])
@@ -211,6 +255,12 @@ pub fn sanitize_mail_html(html: &str, allow_remote_images: bool, frame: Option<&
         if element == "img" && attribute == "src" {
             if let (Some(base), Some(id)) = (&cid_base, value.strip_prefix("cid:")) {
                 return Some(Cow::Owned(format!("{base}{}", percent_encode(id))));
+            }
+            if let Some(url) = value
+                .strip_prefix("cid:")
+                .and_then(|id| inline.get(&crate::provider::cid_of_url(id)))
+            {
+                return Some(Cow::Owned(url.clone()));
             }
             let remote = !(value.starts_with("data:") || value.starts_with("cid:"));
             if remote && !allow_remote_images {
@@ -513,6 +563,21 @@ mod tests {
         // With images on, styles stay as the sender wrote them.
         let on = sanitize_mail_html(html, true, Some(&frame));
         assert!(on.contains("url(https://t.example/x)"), "{on}");
+    }
+
+    #[test]
+    fn cid_images_are_read_as_the_sanitizer_parses_them() {
+        let html = r#"<img src="cid:a&#64;b"><img src=cid:c ><p>src=cid:text</p>
+            <img data-src="cid:lazy"><img src="cid:a%40b"><img src="https://x/y.png">"#;
+        assert_eq!(cid_images(html), ["a@b", "c"]);
+        let inline = HashMap::from([("a@b".to_string(), "data:image/png;base64,AA==".to_string())]);
+        let doc = safe_html_document_inline("s", html, false, &inline);
+        assert_eq!(
+            doc.matches(r#"src="data:image/png;base64,AA==""#).count(),
+            2,
+            "{doc}"
+        );
+        assert!(doc.contains(r#"src="cid:c""#), "{doc}");
     }
 
     #[test]

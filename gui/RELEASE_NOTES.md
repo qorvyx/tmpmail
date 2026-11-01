@@ -21,6 +21,10 @@ what breaks:
   glyphs. The list, the notice, attachment names, links, the code (and the tray's "Copy
   code") and the domain picker are now cleaned in Rust the way the message header and
   notifications already were.
+- **Inline images show for mail.tm mail.** mail.tm lists an inline image by its file name
+  only, not by the `Content-ID` the mail's HTML refers to, so the image showed as its alt
+  text. The app now finds the part with that `Content-ID` in the raw message (mail.tm,
+  mail.gw, DropMail and Maildrop have one) when the listing doesn't name it.
 
 ## What's new in 0.1.3
 

@@ -191,6 +191,9 @@ pub struct Mail {
     pub inline: HashMap<String, (String, Vec<u8>)>,
     /// The message source once fetched (raw MIME, or the HTML body).
     pub source: Option<Arc<String>>,
+    /// The raw source's inline images are in `inline`, or it couldn't be
+    /// read: it isn't fetched again for another `cid:`.
+    pub source_images: bool,
 }
 
 /// Opened messages by key. Keys are never reused, so a frame can't show a
@@ -226,6 +229,7 @@ impl Mails {
             links,
             inline: HashMap::new(),
             source: None,
+            source_images: false,
         }
     }
 

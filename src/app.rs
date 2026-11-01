@@ -17,7 +17,7 @@ use {
     crate::extract,
     crate::provider::{Capabilities, Message},
     crate::push::Poller,
-    crate::render::{body_text, safe_filename, safe_html_document},
+    crate::render::{body_text, safe_filename, safe_html_document_inline},
     crate::system,
     regex::{Regex, RegexBuilder},
     std::sync::Arc,

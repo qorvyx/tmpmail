@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, UriSchemeResponder};
 use tmpmail::app::{App, Global};
 use tmpmail::config::Config;
-use tmpmail::provider::{self, CreateOpts, Summary};
+use tmpmail::provider::{self, CreateOpts, Message, Summary};
 use tmpmail::render::clean_line;
 use tmpmail::watcher::{self, CreateField, Watcher};
 
@@ -439,7 +439,11 @@ impl Front {
     }
 
     /// Serves an inline image, fetching it from the provider the first
-    /// time and keeping it with the message after that.
+    /// time and keeping it with the message after that. The image is the
+    /// attachment the provider lists under the cid's name; else (mail.tm
+    /// lists it by file name only, or the download failed) the part with
+    /// that `Content-ID` in the raw source, where the provider has one. The
+    /// source is read once for all the message's images.
     fn inline(&self, app: &mut App, key: u64, cid: String, responder: UriSchemeResponder) {
         let found = {
             let mails = self.shared.mails.lock().expect("mails lock");
@@ -459,20 +463,63 @@ impl Front {
             }
             Some((None, address, msg)) => (address, msg),
         };
-        let Some((att, mime)) = scheme::find_inline(&msg, &cid) else {
-            return responder.respond(scheme::not_found());
-        };
-        let bytes = app.state.position(&address).and_then(|n| {
+        let listed = provider::inline_attachment(&msg, &cid).and_then(|(att, mime)| {
+            let n = app.state.position(&address)?;
             app.with_inbox_at(n, |p, inbox| p.attachment(inbox, &msg, att))
                 .ok()
+                .filter(|bytes| bytes.len() <= provider::MAX_INLINE_IMAGE)
+                .map(|bytes| (mime, bytes))
         });
-        let Some(bytes) = bytes else {
-            return responder.respond(scheme::not_found());
+        let image = match listed {
+            Some(image) => {
+                if let Some(m) = self.shared.mails.lock().expect("mails lock").get_mut(key) {
+                    m.inline.insert(cid, image.clone());
+                }
+                Some(image)
+            }
+            None => {
+                self.source_images(app, key, &address, &msg);
+                let mails = self.shared.mails.lock().expect("mails lock");
+                mails.get(key).and_then(|m| m.inline.get(&cid).cloned())
+            }
         };
-        if let Some(m) = self.shared.mails.lock().expect("mails lock").get_mut(key) {
-            m.inline.insert(cid, (mime.clone(), bytes.clone()));
+        match image {
+            Some((mime, bytes)) => responder.respond(scheme::image(&mime, bytes)),
+            None => responder.respond(scheme::not_found()),
         }
-        responder.respond(scheme::image(&mime, bytes));
+    }
+
+    /// Puts the inline images of an opened message's raw source (where its
+    /// provider has one) with the message, once: the source is fetched,
+    /// read for all its images, and kept for the Source view too.
+    fn source_images(&self, app: &mut App, key: u64, address: &str, msg: &Message) {
+        {
+            let mut mails = self.shared.mails.lock().expect("mails lock");
+            match mails.get_mut(key) {
+                Some(m) if !m.source_images => m.source_images = true,
+                _ => return,
+            }
+        }
+        let Some(n) = app.state.position(address) else {
+            return;
+        };
+        let id = app.state.inboxes[n].provider.clone();
+        if !provider::get(&id).is_ok_and(|p| p.caps().raw) {
+            return;
+        }
+        let Ok(raw) = app.with_inbox_at(n, |p, inbox| p.raw(inbox, &msg.id)) else {
+            return;
+        };
+        let images = provider::inline_images(&raw);
+        let mut mails = self.shared.mails.lock().expect("mails lock");
+        if let Some(m) = mails.get_mut(key) {
+            for (cid, image) in images {
+                m.inline.entry(cid).or_insert(image);
+            }
+            if m.source.is_none() {
+                m.source = Some(Arc::new(String::from_utf8_lossy(&raw).into_owned()));
+            }
+        }
     }
 
     /// The opened message's source: raw MIME where the provider has it,

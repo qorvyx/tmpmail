@@ -3,6 +3,7 @@ mod guerrilla;
 mod maildrop;
 mod mailtm;
 mod mime;
+mod source;
 mod tempmail_lol;
 
 use chrono::{DateTime, Utc};
@@ -10,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{Error, Result, unsupported};
+
+pub use source::{MAX_INLINE_IMAGE, cid_of_url, image_type, inline_images};
 
 /// Providers tried by `new` when none is configured. Public-inbox providers
 /// (maildrop) are left out on purpose: anyone who guesses the name reads the mail.
@@ -156,6 +159,20 @@ pub struct Attachment {
     /// Absolute URL when the provider exposes one directly.
     #[serde(skip)]
     pub url: Option<String>,
+}
+
+/// The attachment an inline image (`cid:ID` in the HTML, as
+/// [`cid_of_url`] gives it) is, by the provider's listing: the attachment
+/// whose id or file name is the cid or its part before `@`, and that may be
+/// shown as an image ([`image_type`]). Providers' listings don't carry the
+/// `Content-ID`; where they name the part by something else (mail.tm),
+/// [`inline_images`] finds it in the raw source.
+pub fn inline_attachment<'a>(msg: &'a Message, cid: &str) -> Option<(&'a Attachment, String)> {
+    let short = cid.split('@').next().unwrap_or(cid);
+    msg.attachments
+        .iter()
+        .filter(|a| [cid, short].iter().any(|c| a.id == *c || a.filename == *c))
+        .find_map(|a| Some((a, image_type(&a.content_type, &a.filename)?)))
 }
 
 #[derive(Debug, Clone, Serialize)]

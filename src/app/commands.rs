@@ -1,6 +1,6 @@
 //! The CLI's commands, on top of the core in `app`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
 use std::time::{Duration, Instant};
 
@@ -11,6 +11,25 @@ use crate::error::unsupported;
 
 use super::*;
 use crate::cli::*;
+
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
 
 /// How often a cancellable wait checks its flag while sleeping.
 const CANCEL_CHECK: Duration = Duration::from_millis(250);
@@ -302,7 +321,8 @@ impl App {
         let (msg, id) = self.message_at(n, a.msg.id.as_deref())?;
         self.mark_read_noting(n, &id);
         if a.html {
-            let path = self.open_html(&msg, a.images)?;
+            let inline = self.inline_images(n, &msg);
+            let path = self.open_html(&msg, a.images, &inline)?;
             self.note(&format!("opened {}", path.display()));
             return Ok(());
         }
@@ -403,15 +423,61 @@ impl App {
         out
     }
 
+    /// The inline images (`cid:`) of a message's HTML as `data:` URLs, by
+    /// cid: the attachment the provider lists under that name, else the
+    /// part with that `Content-ID` in the raw source (mail.tm lists inline
+    /// images by file name only), read once for all of them. Raster images
+    /// only, up to [`provider::MAX_INLINE_IMAGE`] each; one that can't be
+    /// fetched is left out.
+    fn inline_images(&mut self, n: usize, msg: &Message) -> HashMap<String, String> {
+        let mut out = HashMap::new();
+        let Some(html) = &msg.html else {
+            return out;
+        };
+        let id = self.state.inboxes[n].provider.clone();
+        let can_raw = self.provider(&id).is_ok_and(|p| p.caps().raw);
+        let mut from_source: Option<HashMap<String, (String, Vec<u8>)>> = None;
+        for cid in crate::render::cid_images(html) {
+            let listed = provider::inline_attachment(msg, &cid).and_then(|(att, mime)| {
+                self.with_inbox_at(n, |p, inbox| p.attachment(inbox, msg, att))
+                    .ok()
+                    .map(|bytes| (mime, bytes))
+            });
+            let image = match listed {
+                Some(image) => Some(image),
+                None if can_raw => from_source
+                    .get_or_insert_with(|| {
+                        self.with_inbox_at(n, |p, inbox| p.raw(inbox, &msg.id))
+                            .map(|raw| provider::inline_images(&raw))
+                            .unwrap_or_default()
+                    })
+                    .remove(&cid),
+                None => None,
+            };
+            if let Some((mime, bytes)) =
+                image.filter(|(_, b)| b.len() <= provider::MAX_INLINE_IMAGE)
+            {
+                out.insert(cid, format!("data:{mime};base64,{}", base64(&bytes)));
+            }
+        }
+        out
+    }
+
     /// Writes the message's sanitized HTML to a private file, opens it in
-    /// the browser and returns the file's path.
-    pub(crate) fn open_html(&self, msg: &Message, images: bool) -> Result<std::path::PathBuf> {
+    /// the browser and returns the file's path. `inline` has the `data:`
+    /// URLs of its `cid:` images ([`App::inline_images`]).
+    pub(crate) fn open_html(
+        &self,
+        msg: &Message,
+        images: bool,
+        inline: &HashMap<String, String>,
+    ) -> Result<std::path::PathBuf> {
         let html = match (&msg.html, &msg.text) {
             (Some(h), _) => h.clone(),
             (None, Some(t)) => format!("<pre>{}</pre>", crate::render::escape_html(t)),
             (None, None) => String::new(),
         };
-        let doc = safe_html_document(&msg.subject, &html, images);
+        let doc = safe_html_document_inline(&msg.subject, &html, images, inline);
         let name = format!("{}.html", safe_filename(&msg.id, "message"));
         let browser = self.browser();
         let path = system::write_view(self.store.dir(), browser.as_deref(), &name, &doc)?;
@@ -1352,6 +1418,7 @@ fn unique_path(path: &std::path::Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::Attachment;
     use chrono::TimeZone;
 
     /// A provider whose inbox holds `mail` (id, subject, minute it came in).
@@ -1423,6 +1490,112 @@ mod tests {
         let inbox = Inbox::new("fake", "a@x.com".into(), Value::Null);
         app.state = app.store.update(|s| s.add(inbox)).unwrap().0;
         app
+    }
+
+    /// mail.tm as round 2 met it: the inline image is listed by its file
+    /// name, its `Content-ID` is only in the raw source.
+    struct MailTmLike;
+
+    const CID: &str = "179350583260.525126.3557191885519229186@tmpmail.test";
+
+    impl Provider for MailTmLike {
+        fn id(&self) -> &'static str {
+            "fake"
+        }
+        fn name(&self) -> &'static str {
+            "Fake"
+        }
+        fn website(&self) -> &'static str {
+            ""
+        }
+        fn caps(&self) -> Capabilities {
+            Capabilities {
+                private: true,
+                custom_user: false,
+                choose_domain: false,
+                attachments: true,
+                raw: true,
+                delete_message: false,
+                delete_inbox: false,
+                login: false,
+                lifetime: "",
+            }
+        }
+        fn domains(&self) -> Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        fn create(&self, _: &CreateOpts) -> Result<Inbox> {
+            unimplemented!()
+        }
+        fn list(&self, _: &mut Inbox) -> Result<Vec<Summary>> {
+            Ok(Vec::new())
+        }
+        fn get(&self, _: &mut Inbox, _: &str) -> Result<Message> {
+            unimplemented!()
+        }
+        fn raw(&self, _: &mut Inbox, _: &str) -> Result<Vec<u8>> {
+            Ok(format!(
+                "Content-Type: multipart/related; boundary=b\r\n\r\n--b\r\n\
+                 Content-Type: text/html\r\n\r\n<img src=\"cid:{CID}\">\r\n--b\r\n\
+                 Content-Type: image/png\r\nContent-ID: <{CID}>\r\n\
+                 Content-Transfer-Encoding: base64\r\n\r\niVBORw0KGgo=\r\n--b--\r\n"
+            )
+            .into_bytes())
+        }
+        fn attachment(&self, _: &mut Inbox, _: &Message, a: &Attachment) -> Result<Vec<u8>> {
+            Ok(format!("bytes of {}", a.filename).into_bytes())
+        }
+    }
+
+    #[test]
+    fn read_html_embeds_inline_images() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_test(dir.path().to_path_buf());
+        app.set_provider(Box::new(MailTmLike));
+        let inbox = Inbox::new("fake", "a@x.com".into(), Value::Null);
+        app.state = app.store.update(|s| s.add(inbox)).unwrap().0;
+        let att = |name: &str| Attachment {
+            id: format!("ATTACH-{name}"),
+            filename: name.into(),
+            content_type: "image/png".into(),
+            size: None,
+            url: None,
+        };
+        let msg = Message {
+            id: "m1".into(),
+            html: Some(format!(
+                "<img src=\"cid:{}\"><img src='cid:logo.png'><img src=cid:gone@x>",
+                CID.replace('@', "%40")
+            )),
+            attachments: vec![att("inline-box.png"), att("logo.png")],
+            ..Default::default()
+        };
+        let inline = app.inline_images(0, &msg);
+        // From the source, by Content-ID; and by file name, from the listing.
+        assert_eq!(inline[CID], "data:image/png;base64,iVBORw0KGgo=");
+        assert_eq!(
+            inline["logo.png"],
+            format!("data:image/png;base64,{}", base64(b"bytes of logo.png"))
+        );
+        assert_eq!(inline.len(), 2);
+        // The copy for the browser shows them (its policy allows `data:`);
+        // a cid without an image stays.
+        let doc = safe_html_document_inline("s", msg.html.as_deref().unwrap(), false, &inline);
+        assert!(
+            doc.contains(r#"src="data:image/png;base64,iVBORw0KGgo=""#),
+            "{doc}"
+        );
+        assert_eq!(doc.matches("data:image/png;base64,").count(), 2, "{doc}");
+        assert!(doc.contains(r#"src="cid:gone@x""#), "{doc}");
+    }
+
+    #[test]
+    fn base64_matches_the_standard_alphabet() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"\xff\xfe\xfd\x00"), "//79AA==");
     }
 
     #[test]

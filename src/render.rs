@@ -844,7 +844,7 @@ fn is_http(url: &str) -> bool {
 }
 
 /// Percent-encodes everything but unreserved URL characters.
-fn percent_encode(s: &str) -> String {
+pub fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {

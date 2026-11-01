@@ -43,9 +43,22 @@ pub fn mail_csp(images: bool) -> String {
     let remote = if images { " https:" } else { "" };
     format!(
         "default-src 'none'; img-src data: {own}{remote}; style-src 'unsafe-inline'; \
-         base-uri 'none'; form-action 'none'"
+         base-uri 'none'; form-action 'none'; {}",
+        DOCUMENT_GUARD
     )
 }
+
+/// What every mail and source document gets wherever it is loaded: the
+/// frame's own sandbox (no scripts, an opaque origin, popups only), so even
+/// a document loaded on its own, outside the app's frame, runs nothing;
+/// and only the app's page may frame it.
+pub const DOCUMENT_GUARD: &str = if cfg!(debug_assertions) {
+    "sandbox allow-popups; frame-ancestors tauri://localhost http://tauri.localhost \
+     https://tauri.localhost http://localhost:1420"
+} else {
+    "sandbox allow-popups; frame-ancestors tauri://localhost http://tauri.localhost \
+     https://tauri.localhost"
+};
 
 /// The app theme a frame is drawn for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -280,7 +293,10 @@ pub fn source_response(text: &str, theme: Theme) -> Response<Vec<u8>> {
     let doc = wrap(&format!("<pre>{}</pre>", escape_html(text)), look);
     html_response(
         &doc,
-        Some("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"),
+        Some(&format!(
+            "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; \
+             form-action 'none'; {DOCUMENT_GUARD}"
+        )),
     )
 }
 
@@ -453,7 +469,19 @@ mod tests {
         let off = mail_csp(false);
         let on = mail_csp(true);
         assert!(off.starts_with("default-src 'none';"));
-        assert!(!off.contains("https:"));
-        assert_eq!(on.replace(" https:", ""), off);
+        // Sandboxed and framed by the app only, wherever it is loaded.
+        assert!(
+            off.contains("sandbox allow-popups;")
+                && off.contains("frame-ancestors tauri://localhost")
+        );
+        let img = |csp: &str| {
+            csp.split(';')
+                .find(|d| d.trim().starts_with("img-src"))
+                .unwrap()
+                .to_string()
+        };
+        assert!(!img(&off).contains("https:"));
+        assert_eq!(img(&on).replace(" https:", ""), img(&off));
+        assert_eq!(on.replacen(" https:", "", 1), off);
     }
 }

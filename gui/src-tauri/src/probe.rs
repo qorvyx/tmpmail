@@ -340,7 +340,12 @@ impl Probe {
         match rest {
             ["doc", name] => match CONTROLS.iter().find(|(n, ..)| n == name) {
                 Some((name, csp, _)) => {
-                    let csp = csp.then(|| scheme::mail_csp(false));
+                    // The CSP header's own rules, without the sandbox it now
+                    // also carries (that is the sandbox control's layer).
+                    let csp = csp.then(|| {
+                        scheme::mail_csp(false)
+                            .replace(&format!("; {}", scheme::DOCUMENT_GUARD), "")
+                    });
                     html_response(
                         &scheme::wrap(&self.hostile_html(name), scheme::Look::Light),
                         csp.as_deref(),

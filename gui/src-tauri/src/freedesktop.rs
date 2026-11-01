@@ -123,13 +123,13 @@ pub struct Request {
     pub timeout: i32,
 }
 
-/// The `Notify` arguments for a notification titled `summary`; `body` is
-/// escaped already if the server reads markup.
+/// The `Notify` arguments for a notification titled `summary` (made plain,
+/// [`plain_summary`]); `body` is escaped already if the server reads markup.
 pub fn request(summary: &str, body: &str) -> Request {
     Request {
         app_name: APP_NAME,
         icon: icon(),
-        summary: summary.to_string(),
+        summary: plain_summary(summary),
         body: body.to_string(),
         actions: vec!["default", "Open"],
         hints: vec![("desktop-entry", DESKTOP_ENTRY)],
@@ -439,6 +439,14 @@ fn wayland_display() -> gtk::glib::Type {
     unsafe { gtk::glib::translate::from_glib(gdk_wayland_sys::gdk_wayland_display_get_type()) }
 }
 
+/// A summary with no markup a server could read: the spec makes it plain
+/// text, but some servers (dunst with `markup = full`) format it with the
+/// body, so a sender's `<a href=...>` or `<img src=...>` would become a link
+/// or an image fetch. Angle brackets are shown as look-alikes instead.
+fn plain_summary(s: &str) -> String {
+    s.replace('<', "\u{2039}").replace('>', "\u{203A}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,5 +615,15 @@ mod tests {
         assert_eq!(shown.front().map(|s| s.id), Some(4));
         // The newest is kept even though its id is the smallest.
         assert_eq!(shown.back().map(|s| s.id), Some(1));
+    }
+
+    #[test]
+    fn summaries_carry_no_markup() {
+        // Security review C5.
+        assert_eq!(
+            plain_summary("<a href=\"https://x\">GitHub</a> <img src=x>"),
+            "\u{2039}a href=\"https://x\"\u{203A}GitHub\u{2039}/a\u{203A} \u{2039}img src=x\u{203A}"
+        );
+        assert_eq!(plain_summary("Zo\u{eb} Smith"), "Zo\u{eb} Smith");
     }
 }

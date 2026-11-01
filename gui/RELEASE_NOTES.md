@@ -90,6 +90,13 @@ what breaks:
   to 64 MiB (JSON answers a little more), and an attachment's download address is used only
   on the provider's own site, so a hostile answer can't fill the memory or send the
   account's token elsewhere.
+- **Security: smaller hardening of the app** (C4–C7). A `mailto:` link from a mail is
+  rebuilt from its address, subject and body only, so `attach=` can't prefill a file from
+  the disk in mail clients that honored it. A sender's name in a Linux notification's
+  title can't carry markup (`<` and `>` show as `‹` and `›`) for servers that format it.
+  The mail and source documents carry their own `sandbox` and `frame-ancestors` policy, so
+  they are sandboxed wherever they are loaded. Drag-out files left by a crashed run are
+  deleted at the next start.
 
 ## What's new in 0.1.3
 

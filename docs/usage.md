@@ -223,8 +223,11 @@ verification code, the preview shows it highlighted at the top and `y` copies it
 | `o` | Open the message's sanitized HTML in the browser, like `read --html` |
 | `d` | Delete the message (asks first) |
 | `r` | Check the selected inbox now |
-| `?` | Show the keys |
+| `?` | Show the keys. In a terminal too short for all of them, `↑` `↓` (`j` `k`), `PgUp` `PgDn` (`Space`) and `g` `G` (`Home` `End`) scroll the list, and its bottom line says which rows are shown (`1-5 of 18`); any other key (`Esc`, `?`) closes it. When every key shows, any key closes it |
 | `q`, `Esc`, `Ctrl+C` | Quit (`Esc` steps back a pane first) |
+
+The bottom line shows the keys for the focused pane, then any status message on the right. A
+hint that doesn't fit next to the message is left out whole rather than cut; `? help` is the last to go.
 
 ### `attachments`: list attachments
 

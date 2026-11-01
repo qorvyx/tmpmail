@@ -277,6 +277,10 @@ struct Ui {
     status: Option<(String, Instant)>,
     confirm: Option<Confirm>,
     help: bool,
+    /// The help's first shown row, and how many rows it showed last time
+    /// (it scrolls in a short terminal).
+    help_scroll: u16,
+    help_rows: u16,
     /// The provider picker (`N`), its cursor on a row of `provider::all()`.
     picker: Option<ListState>,
     /// Select this inbox once the worker reports it (after `n`).
@@ -304,6 +308,8 @@ impl Ui {
             status: None,
             confirm: None,
             help: false,
+            help_scroll: 0,
+            help_rows: 0,
             picker: None,
             pending_select: None,
             quit: false,
@@ -563,6 +569,35 @@ impl Ui {
 
     // ----- keys -----
 
+    /// Keys while `?` is open: the scroll keys move it (in a terminal too
+    /// short for every key), any other key closes it.
+    fn help_key(&mut self, code: KeyCode) {
+        let total = KEYS.len() as u16;
+        // As last drawn: drawing again after a resize clamps it too.
+        let rows = self.help_rows.min(total);
+        let last = total - rows;
+        let page = rows.max(1);
+        let s = self.help_scroll;
+        let to = match code {
+            // Everything shows: any key closes it, as before.
+            _ if rows == total => None,
+            KeyCode::Up | KeyCode::Char('k') => Some(s.saturating_sub(1)),
+            KeyCode::Down | KeyCode::Char('j') => Some(s + 1),
+            KeyCode::PageUp => Some(s.saturating_sub(page)),
+            KeyCode::PageDown | KeyCode::Char(' ') => Some(s.saturating_add(page)),
+            KeyCode::Home | KeyCode::Char('g') => Some(0),
+            KeyCode::End | KeyCode::Char('G') => Some(last),
+            _ => None,
+        };
+        match to {
+            Some(to) => self.help_scroll = to.min(last),
+            None => {
+                self.help = false;
+                self.help_scroll = 0;
+            }
+        }
+    }
+
     fn key(&mut self, key: KeyEvent, app: &mut App) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
@@ -592,7 +627,7 @@ impl Ui {
             return;
         }
         if self.help {
-            self.help = false;
+            self.help_key(key.code);
             return;
         }
         match key.code {
@@ -826,7 +861,7 @@ impl Ui {
         self.draw_preview(f, bottom);
         self.draw_footer(f, footer);
         if self.help {
-            draw_help(f);
+            self.help_rows = draw_help(f, &mut self.help_scroll);
         }
         if let Some(state) = &mut self.picker {
             draw_picker(f, state);
@@ -1078,25 +1113,59 @@ impl Ui {
                 ("o", "open"),
             ],
         };
-        let mut spans = vec![Span::raw(" ")];
-        for (k, what) in keys.iter().chain(&[("?", "help"), ("q", "quit")]) {
-            spans.push(Span::styled(*k, Style::new().bold()));
-            spans.push(Span::styled(format!(" {what}  "), Style::new().dim()));
+        f.render_widget(
+            footer_line(keys, self.status.as_ref().map(|s| s.0.as_str()), area.width),
+            area,
+        );
+    }
+}
+
+/// The footer: the key hints that fit whole, then the status message on
+/// the right (cut at its end), at least one space apart.
+fn footer_line(keys: &[(&str, &str)], status: Option<&str>, width: u16) -> Line<'static> {
+    let width = width as usize;
+    let status = status.map(|msg| format!("{} ", fit(&clean_line(msg), width.saturating_sub(1))));
+    let status_w = status.as_deref().map_or(0, |s| Span::raw(s).width());
+    // A space before the status, when there is one.
+    let room = width.saturating_sub(status_w + usize::from(status.is_some()));
+    let width_of = |(k, what): &(&str, &str)| Span::raw(*k).width() + 1 + Span::raw(*what).width();
+    let help = ("?", "help");
+    let all: Vec<(&str, &str)> = keys.iter().copied().chain([help, ("q", "quit")]).collect();
+    // Each hint takes a space before it, two after the first.
+    let total = |hints: &[(&str, &str)]| -> usize {
+        hints.iter().map(width_of).sum::<usize>() + (hints.len() * 2).saturating_sub(1)
+    };
+    let mut shown: Vec<(&str, &str)> = Vec::new();
+    if total(&all) <= room {
+        shown = all;
+    } else {
+        // Keep `? help`, which leads to every other key: the pane's hints
+        // that fit before it.
+        for hint in keys {
+            let mut next = shown.clone();
+            next.extend([*hint, help]);
+            if total(&next) > room {
+                break;
+            }
+            shown.push(*hint);
         }
-        f.render_widget(Line::from(spans), area);
-        if let Some((msg, _)) = &self.status {
-            // Cut at the end, not the start, when it doesn't fit.
-            let room = (area.width as usize).saturating_sub(1);
-            f.render_widget(
-                Line::from(Span::styled(
-                    format!("{} ", fit(&clean_line(msg), room)),
-                    Style::new().fg(Color::Cyan),
-                ))
-                .right_aligned(),
-                area,
-            );
+        if total(&[shown.as_slice(), &[help]].concat()) <= room {
+            shown.push(help);
         }
     }
+    let used = if shown.is_empty() { 0 } else { total(&shown) };
+    let mut spans = Vec::new();
+    for (n, (k, what)) in shown.into_iter().enumerate() {
+        spans.push(Span::raw(if n == 0 { " " } else { "  " }));
+        spans.push(Span::styled(k.to_string(), Style::new().bold()));
+        spans.push(Span::styled(format!(" {what}"), Style::new().dim()));
+    }
+    if let Some(status) = status {
+        let gap = width.saturating_sub(used + status_w);
+        spans.push(Span::raw(" ".repeat(gap)));
+        spans.push(Span::styled(status, Style::new().fg(Color::Cyan)));
+    }
+    Line::from(spans)
 }
 
 /// `s` cut to `cells` terminal columns (wide characters take two), with
@@ -1189,10 +1258,16 @@ fn render_message(msg: &Message, width: u16) -> Text<'static> {
     Text::from(lines)
 }
 
-fn draw_help(f: &mut Frame) {
+/// Draws the key list from row `scroll` (kept within the last page) and
+/// returns how many rows it shows. When not all fit, the bottom border says
+/// which rows are shown and how to scroll.
+fn draw_help(f: &mut Frame, scroll: &mut u16) -> u16 {
     let area = f.area();
     let w = 62.min(area.width);
-    let h = (KEYS.len() as u16 + 2).min(area.height);
+    let total = KEYS.len() as u16;
+    let h = (total + 2).min(area.height);
+    let rows = h.saturating_sub(2);
+    *scroll = (*scroll).min(total - rows.min(total));
     let rect = Rect::new(
         area.x + (area.width - w) / 2,
         area.y + (area.height - h) / 2,
@@ -1208,15 +1283,22 @@ fn draw_help(f: &mut Frame) {
             ])
         })
         .collect();
+    let mut block = Block::bordered()
+        .title(" Keys ")
+        .border_style(Style::new().fg(Color::Cyan));
+    if rows > 0 && rows < total {
+        block = block.title_bottom(format!(
+            " {}-{} of {total} ↑↓ ",
+            *scroll + 1,
+            *scroll + rows
+        ));
+    }
     f.render_widget(Clear, rect);
     f.render_widget(
-        Paragraph::new(lines).block(
-            Block::bordered()
-                .title(" Keys ")
-                .border_style(Style::new().fg(Color::Cyan)),
-        ),
+        Paragraph::new(lines).block(block).scroll((*scroll, 0)),
         rect,
     );
+    rows
 }
 
 /// What `?` shows: every key the TUI knows.
@@ -1523,6 +1605,103 @@ mod tests {
         for k in ["g G", "Space", "Enter", "h l", "Esc", "Ctrl+C", "?"] {
             assert!(keys.contains(k), "{k} missing from {keys}");
         }
+    }
+
+    fn row(terminal: &ratatui::Terminal<ratatui::backend::TestBackend>, y: u16) -> String {
+        let buf = terminal.backend().buffer();
+        (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect()
+    }
+
+    #[test]
+    fn the_help_scrolls_in_a_short_terminal() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_test(dir.path().to_path_buf());
+        let mut ui = busy_ui();
+        let n = KEYS.len();
+        let range = |a: usize, b: usize| format!("{a}-{b} of {n} ");
+        let mut terminal = Terminal::new(TestBackend::new(120, 7)).unwrap();
+        let screen = |ui: &mut Ui, terminal: &mut Terminal<TestBackend>| {
+            terminal.draw(|f| ui.draw(f)).unwrap();
+            (0..7)
+                .map(|y| row(terminal, y))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        press(&mut ui, &mut app, KeyCode::Char('?'));
+        let first = screen(&mut ui, &mut terminal);
+        assert!(first.contains("Tab / ← → / h l"), "{first}");
+        assert!(first.contains(&range(1, 5)), "{first}");
+        assert!(!first.contains("Ctrl+C"), "{first}");
+        // Every key can be reached, and scrolling stops at the last one.
+        for _ in 0..30 {
+            press(&mut ui, &mut app, KeyCode::Char('j'));
+            screen(&mut ui, &mut terminal);
+        }
+        let last = screen(&mut ui, &mut terminal);
+        assert!(last.contains("q / Ctrl+C"), "{last}");
+        assert!(last.contains(&range(n - 4, n)), "{last}");
+        press(&mut ui, &mut app, KeyCode::Char('k'));
+        assert!(screen(&mut ui, &mut terminal).contains(&range(n - 5, n - 1)));
+        press(&mut ui, &mut app, KeyCode::Home);
+        press(&mut ui, &mut app, KeyCode::PageDown);
+        assert!(screen(&mut ui, &mut terminal).contains(&range(6, 10)));
+        assert!(ui.help, "scroll keys keep it open");
+        press(&mut ui, &mut app, KeyCode::Esc);
+        assert!(!ui.help && !ui.quit);
+        // Opened again, it starts at the top; `?` closes it too.
+        press(&mut ui, &mut app, KeyCode::Char('?'));
+        assert!(screen(&mut ui, &mut terminal).contains(&range(1, 5)));
+        press(&mut ui, &mut app, KeyCode::Char('?'));
+        assert!(!ui.help);
+        // Tall enough, it shows no scroll line.
+        ui.help_rows = 0;
+        let mut tall = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        press(&mut ui, &mut app, KeyCode::Char('?'));
+        tall.draw(|f| ui.draw(f)).unwrap();
+        let all: String = (0..30).map(|y| row(&tall, y)).collect();
+        assert!(
+            all.contains("q / Ctrl+C") && !all.contains(" of 18"),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn key_hints_stay_whole_and_apart_from_the_status() {
+        let keys = &[
+            ("y", "copy code"),
+            ("L", "copy link"),
+            ("O", "open link"),
+            ("o", "open"),
+        ];
+        let text = |status: Option<&str>, width: u16| -> String {
+            let line = footer_line(keys, status, width);
+            assert!(line.width() <= width as usize, "{line:?}");
+            line.spans.iter().map(|s| s.content.as_ref()).collect()
+        };
+        let line = text(Some("copied the first link"), 50);
+        assert_eq!(line, " y copy code  ? help        copied the first link ");
+        let long = "could not delete the message: dropmail: deleting messages is not supported";
+        let line = text(Some(long), 120);
+        assert!(line.ends_with(&format!(" {long} ")), "{line}");
+        assert!(line.starts_with(" y copy code  L copy link "), "{line}");
+        assert!(!line.contains("Ocould"), "{line}");
+        // `? help` stays when the pane's hints don't all fit.
+        let line = text(Some("copied the first link"), 60);
+        assert_eq!(
+            line,
+            " y copy code  L copy link  ? help     copied the first link "
+        );
+        // A status as wide as the line leaves no hints.
+        let line = text(Some(&"x".repeat(80)), 40);
+        assert!(!line.contains("copy"), "{line}");
+        // Without a status, the hints that fit, whole.
+        assert_eq!(text(None, 30), " y copy code  ? help");
+        assert_eq!(
+            text(None, 200),
+            " y copy code  L copy link  O open link  o open  ? help  q quit"
+        );
     }
 
     fn press(ui: &mut Ui, app: &mut App, code: KeyCode) {

@@ -110,7 +110,7 @@ pub fn clean_line(s: &str) -> String {
 /// Bidi controls and the other invisible format characters (Unicode's Cf
 /// category), except the zero-width joiner and non-joiner and the tag
 /// characters of emoji flags (U+E0020–U+E007F).
-fn is_hidden_format(c: char) -> bool {
+pub(crate) fn is_hidden_format(c: char) -> bool {
     matches!(
         c,
         '\u{AD}'

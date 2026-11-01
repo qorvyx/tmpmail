@@ -473,7 +473,9 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    The theme and view options are in the frame's URL; no script ever touches the frame.
 4. Links get `target="_blank"`; the app denies every new window and opens only http, https
    and mailto links in the system browser, from Rust. The link list's Open does the same
-   for http and https.
+   for http and https, and only for a whole absolute URL with a host (the core's
+   `extract::is_web_link`): a "link" that only starts with `http` (`http\..\setup.exe`)
+   would be a file path to the system opener, so it isn't listed or opened.
 5. **Commands accept calls only from the app's page** (`src-tauri/src/caller.rs`, run by
    the invoke handler before any command, so none can skip it). WebView2 injects Tauri's
    bridge (`__TAURI_INTERNALS__`, with the invoke key) into **every frame**, and the mail

@@ -813,7 +813,7 @@ impl App {
             links.truncate(1);
         }
         if a.open {
-            system::open(&links[0], self.browser().as_deref())?;
+            system::open_link(&links[0], self.browser().as_deref())?;
         }
         if self.global.json {
             self.json_out(&json!({ "links": links, "message_id": msg.id }));

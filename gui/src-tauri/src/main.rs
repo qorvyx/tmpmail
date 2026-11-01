@@ -555,10 +555,11 @@ mod tests {
         let msg = Message {
             subject: "Your code".into(),
             text: Some(
-                "Code 482913. https://ex\u{e4}mple.com/v\u{202e}rify?t=1 \
+                "Code 482913. https://ex\u{e4}mple.com/verify?t=1 \
                  https://EXAMPLE.com/a https://example.com/a"
                     .into(),
             ),
+            html: Some("<a href=\"https://example.com/v\u{202e}rify\">v</a>".into()),
             ..Message::default()
         };
         let mail = Mails::entry("a@b.c", msg);
@@ -566,7 +567,8 @@ mod tests {
         assert_eq!(
             mail.links,
             [
-                "https://xn--exmple-cua.com/v%E2%80%AErify?t=1",
+                "https://xn--exmple-cua.com/verify?t=1",
+                "https://example.com/v%E2%80%AErify",
                 "https://example.com/a"
             ]
         );

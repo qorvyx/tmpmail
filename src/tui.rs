@@ -709,7 +709,7 @@ impl Ui {
             },
             KeyCode::Char('O') => match self.message().map(message_links) {
                 Some(links) if !links.is_empty() => {
-                    match system::open(&links[0], app.browser().as_deref()) {
+                    match system::open_link(&links[0], app.browser().as_deref()) {
                         Ok(()) => self.say(format!("opened {}", clean_line(&links[0]))),
                         Err(e) => self.say(format!("could not open the link: {e:#}")),
                     }

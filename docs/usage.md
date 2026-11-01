@@ -177,8 +177,15 @@ Lists every link in a message. Verify, confirm, activate, magic-login and passwo
 come first. Unsubscribe, social media and image links come last. An address the HTML only
 loads (an image's `src`, `srcset` or `background`, a CSS `url(...)`) isn't a link a reader
 would open, so it is left out, also when the text part repeats it, unless the mail links to
-it (`href`). The same list feeds `wait --link`, `L`/`O` in the TUI, the MCP
-server and the desktop app.
+it (`href`). A link is read as a browser reads it (character references such as `&#38;`
+decoded, line breaks dropped, spaces and invisible characters inside escaped as `%20` and
+the like), and is then only a whole absolute `http://` or `https://` URL with a host: a
+string that only starts with `http` (`http\..\setup.exe`, `http/../file.html`) or has a
+backslash in it is left out, since an opener would take it for a file on disk. So a link
+never holds a line break, which a shell would run as a second command when the link is
+pasted (still quote a pasted link: `;` or `|` in it mean something to a shell). `--open`
+(and `O` in the TUI) refuse anything else whatever the list holds. The same list feeds
+`wait --link`, `L`/`O` in the TUI, the MCP server and the desktop app.
 
 | Option | Short | Explanation |
 |---|---|---|

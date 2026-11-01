@@ -57,11 +57,13 @@ fn check_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// An http or https link, the only kind the app opens.
+/// An http or https link, the only kind the app opens: the core's rule
+/// ([`tmpmail::extract::is_web_link`]: absolute, with a host, nothing a
+/// system opener could take for a file path).
 pub fn web_url(s: &str) -> Option<Url> {
-    Url::parse(s)
-        .ok()
-        .filter(|u| matches!(u.scheme(), "http" | "https"))
+    tmpmail::extract::is_web_link(s)
+        .then(|| Url::parse(s).ok())
+        .flatten()
 }
 
 fn optional(s: Option<String>) -> Option<String> {
@@ -543,6 +545,9 @@ mod tests {
         assert!(web_url("javascript:alert(1)").is_none());
         assert!(web_url("file:///etc/passwd").is_none());
         assert!(web_url("mailto:a@b.c").is_none());
+        assert!(web_url("http/../../etc/hostname").is_none());
+        assert!(web_url("http\\..\\calc.exe").is_none());
+        assert!(web_url("https://x.example/a b").is_none());
     }
 
     #[test]

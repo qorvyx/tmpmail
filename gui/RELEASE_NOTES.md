@@ -57,6 +57,10 @@ what breaks:
 - **A refused label's reason is in view.** In a 1280×800 window the new inbox dialog
   scrolls, and the reason under the label field sat below its visible part; the dialog now
   scrolls to it.
+- **Security: a "link" must be a real web address.** A mail's `href="http\..\setup.exe"`
+  only started with `http`, so it was listed as a link; the app's Open already refused it,
+  but the list now leaves it out (core of CLI 0.3.5), and the app's opener takes only a
+  whole absolute `http(s)` URL with a host.
 
 ## What's new in 0.1.3
 

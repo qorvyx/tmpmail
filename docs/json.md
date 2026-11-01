@@ -10,6 +10,10 @@ within a major version.
 {"error": {"kind": "unreachable", "message": "mailtm: unreachable (HTTP 502)"}}
 ```
 
+Usage errors that come from the command line itself (an unknown option, a bad value,
+conflicting options) are reported the same way when `--json` is on it, with kind `usage`.
+`--help` and `--version` stay plain text.
+
 `kind` is one of `unreachable`, `rate_limited`, `auth`, `bad_response`, `not_found`,
 `unsupported`, `address_taken`, `expired`, `no_inbox`, `timeout`, `usage`, `error`.
 The exit code matches (see the README).

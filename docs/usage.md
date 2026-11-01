@@ -49,7 +49,7 @@ ignore case. Plain words work: `--from github` matches `GitHub <noreply@github.c
 
 | Option | Short | Explanation |
 |---|---|---|
-| `--json` | | Print machine-readable JSON instead of text (format in [json.md](json.md)). Errors become `{"error":{"kind","message"}}`. |
+| `--json` | | Print machine-readable JSON instead of text (format in [json.md](json.md)). Errors become `{"error":{"kind","message"}}`, on stdout; so do usage errors (an unknown option, a bad value, options that conflict), with kind `usage` and exit 64. |
 | `--inbox ADDR` | `-i` | Act on this inbox instead of the active one. Example: `tmpmail -i github ls`. Also settable with `TMPMAIL_INBOX`. |
 | `--quiet` | `-q` | Print only the essential result, without hints or status lines. Example: `addr=$(tmpmail new -q)`. |
 | `--no-color` | | No bold or dim text. Colors are also off when output is piped or `NO_COLOR` is set. In a Windows console, tmpmail turns on its escape-code processing (off in the classic `cmd.exe` window) and prints without colors if it can't. |
@@ -377,7 +377,7 @@ tmpmail man -o ~/.local/share/man/man1     # install tmpmail.1 and tmpmail-COMMA
 
 | Option | Short | Explanation |
 |---|---|---|
-| `--output DIR` | `-o` | Write one page per command into this folder instead of printing the main page. |
+| `--output DIR` | `-o` | Write one page per command into this folder instead of printing the main page. If the folder can't be created or written, the error names it (exit 1). |
 
 ### `completions`: shell completion
 

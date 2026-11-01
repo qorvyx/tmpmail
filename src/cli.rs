@@ -495,9 +495,56 @@ pub fn rewrite_legacy(args: Vec<String>) -> Vec<String> {
     out
 }
 
+/// Whether the command line asks for `--json`, read before it is parsed
+/// so that a usage error can be reported as JSON too. Arguments after
+/// `--` are values, not options.
+pub fn wants_json(args: &[String]) -> bool {
+    args.iter()
+        .skip(1)
+        .take_while(|a| *a != "--")
+        .any(|a| a == "--json")
+}
+
+/// A usage error's message for `{"error": ...}`: clap's text up to its
+/// `Usage:` line (what is wrong, and any tip), on one line, without the
+/// `error: ` prefix.
+pub fn usage_message(e: &clap::Error) -> String {
+    let text = e.render().to_string();
+    let what: Vec<&str> = text
+        .lines()
+        .take_while(|l| !l.starts_with("Usage:"))
+        .collect();
+    let line = crate::render::clean_line(&what.join(" "));
+    line.strip_prefix("error: ").unwrap_or(&line).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_errors_can_be_reported_as_json() {
+        let args = |s: &str| -> Vec<String> {
+            std::iter::once("tmpmail")
+                .chain(s.split_whitespace())
+                .map(String::from)
+                .collect()
+        };
+        assert!(wants_json(&args("--json watch --rotate 30s")));
+        assert!(wants_json(&args("watch --json --rotate 30s")));
+        assert!(!wants_json(&args("watch --rotate 30s")));
+        assert!(!wants_json(&args("new -- --json")));
+        let message = |s: &str| usage_message(&Cli::try_parse_from(args(s)).unwrap_err());
+        let rotate = message("--json watch --rotate 30s");
+        assert!(rotate.contains("rotate at most once a minute"), "{rotate}");
+        assert!(!rotate.starts_with("error"), "{rotate}");
+        // What is missing is on clap's next lines; the tip is kept too.
+        let missing = message("--json use");
+        assert!(missing.contains("<ADDRESS>"), "{missing}");
+        let typo = message("--json wait --fro x");
+        assert!(typo.contains("--from"), "{typo}");
+        assert!(!typo.contains("Usage"), "{typo}");
+    }
 
     fn rw(s: &str) -> String {
         let args = std::iter::once("tmpmail")

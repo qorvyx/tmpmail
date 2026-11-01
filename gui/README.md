@@ -393,7 +393,22 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    arbitrary text. Settings are checked field by field in Rust before anything is written.
 8. The shell has a strict CSP, `freezePrototype`, no global Tauri object, no asset protocol,
    and one capability.
-9. Windows: the `tmpmail-desktop:` scheme a notification click launches can be opened by
+9. What the sender or a provider writes is cleaned in Rust before it reaches the page, so
+   the page can't forget it: the list rows' sender, subject and preview (and so the "New
+   mail" notice, the filter and the delete dialog), the open message's header, attachment
+   names, the code (and the tray's "Copy code" label), notices and the provider errors in
+   the list, the new inbox dialog and Save go through `render::clean_line`, which drops
+   terminal escape sequences whole, control characters, bidi controls (U+202A–U+202E,
+   U+2066–U+2069, U+200E/F, U+061C) and the other invisible format characters (zero-width
+   joiners and emoji flag tags stay); the links list gets each link as the browser would
+   (parsed, so an ASCII string: punycode hosts, escaped paths); the domain picker shows
+   only names that look like domains; and an address a provider hands out is refused when
+   it isn't one (`checked_address`), so inbox addresses are clean too. A right-to-left
+   override in a sender can't turn a row around to show another address (campaign round
+   2, B1). Codes are still looked for in the sender's own text, as the CLI does. The mail
+   body in the frame is shown as sent (sanitized HTML; right-to-left text needs its
+   marks).
+10. Windows: the `tmpmail-desktop:` scheme a notification click launches can be opened by
    any program, or a web page the user allows to. The app accepts only
    `tmpmail-desktop://open?inbox=ADDRESS[&message=ID]` (no other key, each once, the shapes
    checked) and only for a stored inbox; it can bring the window back and open that

@@ -3,13 +3,99 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 
-/// Removes control characters (ANSI escapes, carriage returns, bidi
-/// overrides) so a message cannot rewrite the user's terminal. Keeps
-/// newlines and tabs.
+/// Removes what could rewrite the user's terminal or disguise the text:
+/// terminal escape sequences (CSI and OSC sequences and the other ESC
+/// sequences, whole), control characters (carriage returns, ESC, C1
+/// controls), bidi controls (overrides, embeddings, isolates, marks) and
+/// the other invisible format characters (zero-width spaces, word joiners,
+/// the BOM). Zero-width joiners and non-joiners and Unicode tags stay:
+/// emoji sequences (and flags) and some scripts need them. Keeps newlines
+/// and tabs.
 pub fn clean(s: &str) -> String {
-    s.chars()
-        .filter(|&c| c == '\n' || c == '\t' || !(c.is_control() || is_bidi_control(c)))
-        .collect()
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    // Once a string sequence (OSC, DCS...) found no terminator, none after
+    // it will: later ones aren't searched for again, so a mail full of
+    // them stays linear.
+    let mut unterminated = false;
+    while let Some(c) = rest.chars().next() {
+        let after = &rest[c.len_utf8()..];
+        rest = match c {
+            '\u{1b}' => skip_escape(after, &mut unterminated),
+            '\n' | '\t' => {
+                out.push(c);
+                after
+            }
+            // Line and paragraph separators: plain newlines.
+            '\u{2028}' | '\u{2029}' => {
+                out.push('\n');
+                after
+            }
+            // C1 controls (U+0080–U+009F) go one by one, never as the start
+            // of a sequence: headers labelled ISO-8859-1 but written in
+            // Windows-1252 decode their quotes and dashes to them.
+            c if c.is_control() || is_hidden_format(c) => after,
+            c => {
+                out.push(c);
+                after
+            }
+        };
+    }
+    out
+}
+
+/// After an ESC: the rest of the text without the sequence it starts. A
+/// stray ESC (before a letter, a space, or a string that never ends) goes
+/// alone, so it can't take real text with it.
+fn skip_escape<'a>(s: &'a str, unterminated: &mut bool) -> &'a str {
+    let Some(c) = s.chars().next() else { return s };
+    let after = &s[c.len_utf8()..];
+    match c {
+        '[' => skip_csi(after),
+        ']' | 'P' | 'X' | '^' | '_' if !*unterminated => match string_end(after) {
+            Some(end) => end,
+            None => {
+                *unterminated = true;
+                s
+            }
+        },
+        // Intermediate bytes, then one final byte (`ESC ( B`, `ESC # 8`).
+        '!'..='/' => {
+            let t = after.trim_start_matches(|c| matches!(c, ' '..='/'));
+            match t.chars().next() {
+                Some(f @ '0'..='~') => &t[f.len_utf8()..],
+                _ => s,
+            }
+        }
+        // Two-character sequences with a digit or symbol (`ESC 7`, `ESC =`).
+        '0'..='?' => after,
+        _ => s,
+    }
+}
+
+/// After a CSI: parameter and intermediate bytes, then the final byte.
+fn skip_csi(s: &str) -> &str {
+    let t = s.trim_start_matches(|c| matches!(c, ' '..='?'));
+    match t.chars().next() {
+        Some(f @ '@'..='~') => &t[f.len_utf8()..],
+        _ => t,
+    }
+}
+
+/// After an OSC, DCS, SOS, PM or APC introducer: the text after its
+/// terminator (BEL, `ESC \\` or ST), or `None` if it has none.
+fn string_end(s: &str) -> Option<&str> {
+    let i = s.find(['\u{7}', '\u{1b}', '\u{9c}'])?;
+    let t = &s[i..];
+    Some(if let Some(rest) = t.strip_prefix("\u{1b}\\") {
+        rest
+    } else if t.starts_with('\u{1b}') {
+        // Another escape starts: this string ends here.
+        t
+    } else {
+        // BEL or ST, one character each.
+        &t[t.chars().next().map_or(1, char::len_utf8)..]
+    })
 }
 
 /// Like [`clean`] but also flattens newlines and tabs, for one-line fields.
@@ -21,8 +107,34 @@ pub fn clean_line(s: &str) -> String {
     flat.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn is_bidi_control(c: char) -> bool {
-    matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+/// Bidi controls and the other invisible format characters (Unicode's Cf
+/// category), except the zero-width joiner and non-joiner and the tag
+/// characters of emoji flags (U+E0020–U+E007F).
+fn is_hidden_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{AD}'
+            | '\u{600}'..='\u{605}'
+            | '\u{61C}'
+            | '\u{6DD}'
+            | '\u{70F}'
+            | '\u{890}'..='\u{891}'
+            | '\u{8E2}'
+            | '\u{180E}'
+            | '\u{200B}'
+            | '\u{200E}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0001}'
+    )
 }
 
 /// Plain-text rendering of an HTML body, without loading anything remote.
@@ -252,8 +364,69 @@ mod tests {
     #[test]
     fn strips_terminal_escapes() {
         let evil = "Hi\x1b[2J\x1b]0;pwned\x07 there\r\nnext\u{202E}line";
-        assert_eq!(clean(evil), "Hi[2J]0;pwned there\nnextline");
+        assert_eq!(clean(evil), "Hi there\nnextline");
         assert_eq!(clean_line("a\n\tb   c"), "a b c");
+        // Every kind of sequence goes whole; a stray ESC alone.
+        assert_eq!(clean("\x1b[31mRED\x1b[0m"), "RED");
+        assert_eq!(clean("a\x1b]8;;https://x\x1b\\b\x1b]8;;\x1b\\c"), "abc");
+        assert_eq!(clean("a\x1b(Bb\x1b7c\x1b]0;t\x1b[1md"), "abcd");
+        assert_eq!(clean("a\x1b]never ends"), "a]never ends");
+        assert_eq!(clean("a\x1b"), "a");
+        assert_eq!(clean("a\x1bé"), "aé");
+        assert_eq!(clean("Hi\x1b there"), "Hi there");
+        assert_eq!(clean("a\x1bPlease"), "aPlease");
+        assert_eq!(clean("a\x1bcool"), "acool");
+        // C1 controls go alone: a Windows-1252 subject labelled ISO-8859-1
+        // keeps its words.
+        assert_eq!(
+            clean("\u{9e}zivot a \u{9c}uvre \u{9b}2024 Sale"),
+            "zivot a uvre 2024 Sale"
+        );
+    }
+
+    #[test]
+    fn many_unterminated_strings_stay_fast() {
+        // Each string ends where the next escape starts; the last one never
+        // ends, so only its ESC goes.
+        let evil = "\x1b]abc".repeat(200_000);
+        let start = std::time::Instant::now();
+        assert_eq!(clean(&evil), "]abc");
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn strips_bidi_and_invisible_format_characters() {
+        // The hostile sender of campaign round 2 (B1): the override would
+        // turn the rest of a list row around.
+        assert_eq!(
+            clean_line("\"<b>Evil</b> & Co \u{202e}boN\" <evil@x.com>"),
+            "\"<b>Evil</b> & Co boN\" <evil@x.com>"
+        );
+        for c in [
+            '\u{202A}',
+            '\u{202E}',
+            '\u{2066}',
+            '\u{2069}',
+            '\u{200E}',
+            '\u{200F}',
+            '\u{61C}',
+            '\u{200B}',
+            '\u{2060}',
+            '\u{FEFF}',
+            '\u{AD}',
+            '\u{E0001}',
+            '\u{85}',
+            '\u{9b}',
+        ] {
+            assert_eq!(clean_line(&format!("a{c}b")), "ab", "U+{:04X}", c as u32);
+        }
+        assert_eq!(clean_line("a\u{2028}b"), "a b");
+        // Joiners and flag tags stay: emoji sequences and some scripts
+        // need them.
+        assert_eq!(clean("👩\u{200D}💻 \u{200C}"), "👩\u{200D}💻 \u{200C}");
+        let england = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+        assert_eq!(clean(england), england);
+        assert_eq!(clean("Zoë 日本 مرحبا"), "Zoë 日本 مرحبا");
     }
 
     #[test]

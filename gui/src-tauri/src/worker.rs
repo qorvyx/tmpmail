@@ -128,10 +128,12 @@ impl Front {
         ok
     }
 
+    /// A toast in the window. Its text often quotes a provider's error, so
+    /// it is cleaned here, once for every notice.
     fn notice(&self, kind: &str, text: &str) {
         let _ = self
             .handle
-            .emit("notice", json!({ "kind": kind, "text": text }));
+            .emit("notice", json!({ "kind": kind, "text": clean_line(text) }));
     }
 }
 
@@ -167,6 +169,8 @@ impl watcher::Front for Front {
     ) -> bool {
         let payload = match result {
             Ok(list) => {
+                // Codes are looked for in the sender's own words, as when
+                // the message is opened; only what the page shows is cleaned.
                 let arrived = self.arrivals.listed(&address, &list);
                 for a in &arrived {
                     if let Some(code) = &a.code {
@@ -174,9 +178,10 @@ impl watcher::Front for Front {
                     }
                 }
                 self.arrivals.queue(arrived);
+                let list: Vec<Summary> = list.into_iter().map(shown).collect();
                 json!({ "address": address, "live": live, "messages": list })
             }
-            Err(e) => json!({ "address": address, "live": live, "error": e }),
+            Err(e) => json!({ "address": address, "live": live, "error": clean_line(&e) }),
         };
         self.messages(address, payload)
     }
@@ -258,17 +263,17 @@ impl watcher::Front for Front {
                         // request: the dialog shows it by that field.
                         let payload = match w.refused(&opts, asked.as_deref()) {
                             Some((field, why)) => json!({
-                                "text": format!("{}.", capital(&why)),
+                                "text": clean_line(&format!("{}.", capital(&why))),
                                 "field": match field {
                                     CreateField::User => "user",
                                     _ => "label",
                                 },
                             }),
                             None => json!({
-                                "text": format!(
+                                "text": clean_line(&format!(
                                     "{}. Try another provider, or leave the options empty.",
                                     capital(&e)
-                                ),
+                                )),
                             }),
                         };
                         let _ = self.handle.emit("create_failed", payload);
@@ -421,7 +426,7 @@ impl Front {
                 (event, true)
             }
             Err(e) => (
-                json!({ "address": address, "id": id, "error": e.to_string() }),
+                json!({ "address": address, "id": id, "error": clean_line(&e.to_string()) }),
                 false,
             ),
         };
@@ -539,8 +544,24 @@ impl Front {
             .ok_or("that inbox was deleted")?;
         let name = provider_name(app, &address);
         app.with_inbox_at(n, |p, inbox| p.attachment(inbox, &msg, att))
-            .map_err(|e| format!("Couldn't download it from {name}: {e}. Try again in a moment."))
+            .map_err(|e| {
+                clean_line(&format!(
+                    "Couldn't download it from {name}: {e}. Try again in a moment."
+                ))
+            })
     }
+}
+
+/// A listing entry as the page shows it: the sender's words cleaned
+/// (`render::clean_line`: escapes, control, bidi and other invisible format
+/// characters), so a list row or the "New mail" notice can't be turned
+/// around or made to show another address. The id stays as the provider
+/// gave it: commands need it back unchanged, and the page never shows it.
+pub fn shown(mut s: Summary) -> Summary {
+    s.from = clean_line(&s.from);
+    s.subject = clean_line(&s.subject);
+    s.intro = clean_line(&s.intro);
+    s
 }
 
 /// The display name of an inbox's provider.
@@ -557,4 +578,26 @@ fn capital(s: &str) -> String {
     c.next()
         .map(|f| f.to_uppercase().chain(c).collect())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_rows_get_the_senders_words_cleaned() {
+        // The hostile mail of campaign round 2 (B1).
+        let raw = Summary {
+            id: "m\u{202e}1".into(),
+            from: "\"<b>Evil</b> & Co \u{202e}boN\" <evil@fldubai.com>".into(),
+            subject: "\u{1b}[31mRED\u{1b}[0m \u{202e}desrever\u{200b}".into(),
+            intro: "line\none\u{2066}".into(),
+            ..Summary::default()
+        };
+        let row = shown(raw.clone());
+        assert_eq!(row.from, "\"<b>Evil</b> & Co boN\" <evil@fldubai.com>");
+        assert_eq!(row.subject, "RED desrever");
+        assert_eq!(row.intro, "line one");
+        assert_eq!(row.id, raw.id, "ids go back to the provider unchanged");
+    }
 }

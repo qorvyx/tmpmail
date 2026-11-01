@@ -13,6 +13,15 @@ Windows 11, and macOS has only been checked by the automated security probe. Ple
 what breaks:
 <https://github.com/qorvyx/tmpmail/issues>.
 
+## What's new in 0.1.4
+
+- **The message list can't be turned around by a sender.** A sender name or subject with a
+  right-to-left override (U+202E) reversed the rest of its row in the list and in the "New
+  mail" notice, so a row could read as another address, and terminal escapes showed as box
+  glyphs. The list, the notice, attachment names, links, the code (and the tray's "Copy
+  code") and the domain picker are now cleaned in Rust the way the message header and
+  notifications already were.
+
 ## What's new in 0.1.3
 
 - **Names and subjects show decoded.** Mail from tempmail.lol showed encoded sender names

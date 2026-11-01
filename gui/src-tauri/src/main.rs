@@ -31,7 +31,7 @@ use tauri::{Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder, WindowEven
 use tauri_plugin_opener::OpenerExt;
 use tmpmail::extract;
 use tmpmail::provider::Message;
-use tmpmail::render::body_text;
+use tmpmail::render::{body_text, clean_line};
 
 use crate::worker::Req;
 
@@ -204,14 +204,21 @@ pub struct Mails {
 impl Mails {
     pub fn entry(address: &str, msg: Message) -> Mail {
         let body = body_text(msg.text.as_deref(), msg.html.as_deref(), 200);
-        let code = extract::otp(&msg.subject, &body, None);
-        let links = extract::links(
+        let code = extract::otp(&msg.subject, &body, None)
+            .map(|c| clean_line(&c))
+            .filter(|c| !c.is_empty());
+        // Links as the browser gets them: parsed, so what is shown, copied
+        // and opened is the same ASCII text (punycode hosts, escaped paths)
+        // and can't hide bidi or invisible characters.
+        let mut links = Vec::new();
+        for l in extract::links(
             msg.text.as_deref().unwrap_or_default(),
             msg.html.as_deref().unwrap_or_default(),
-        )
-        .into_iter()
-        .filter(|l| commands::web_url(l).is_some())
-        .collect();
+        ) {
+            if let Some(url) = commands::web_url(&l) {
+                commands::push_new(&mut links, url.to_string());
+            }
+        }
         Mail {
             address: address.to_string(),
             msg: Arc::new(msg),
@@ -538,6 +545,28 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opened_mail_links_and_code_are_shown_as_ascii_and_clean() {
+        let msg = Message {
+            subject: "Your code".into(),
+            text: Some(
+                "Code 482913. https://ex\u{e4}mple.com/v\u{202e}rify?t=1 \
+                 https://EXAMPLE.com/a https://example.com/a"
+                    .into(),
+            ),
+            ..Message::default()
+        };
+        let mail = Mails::entry("a@b.c", msg);
+        assert_eq!(mail.code.as_deref(), Some("482913"));
+        assert_eq!(
+            mail.links,
+            [
+                "https://xn--exmple-cua.com/v%E2%80%AErify?t=1",
+                "https://example.com/a"
+            ]
+        );
+    }
 
     #[test]
     #[cfg(target_os = "linux")]

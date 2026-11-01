@@ -440,7 +440,12 @@ config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
 
 - State (addresses and their credentials) lives in `$XDG_STATE_HOME/tmpmail/state.json`
   (`~/.local/state/tmpmail`), directory `0700`, file `0600`, never in `/tmp`.
-- Message text is stripped of terminal control sequences before printing.
+- Message text is stripped of terminal escape sequences (whole: `ESC[31m` goes, not only the
+  ESC), control characters, bidi controls (U+202A–U+202E, U+2066–U+2069, U+200E/F, U+061C)
+  and other invisible format characters before printing, so a sender can't rewrite your
+  terminal or make a line read backwards. The desktop app cleans the sender, subject,
+  preview, attachment names, links and provider domains the same way before the window
+  shows them.
 - `read --html` writes a sanitized copy (no scripts, forms, frames; strict CSP) and
   **blocks remote images** (tracking pixels) unless you pass `--images` (then they load from
   the sender's servers, Guerrilla Mail's too, not through its proxy). These copies are

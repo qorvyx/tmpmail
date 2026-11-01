@@ -88,11 +88,7 @@ fn create_opts(
     }
     let domain = optional(domain).map(|d| d.to_ascii_lowercase());
     if let Some(d) = &domain
-        && (d.len() > 253
-            || !d.contains('.')
-            || !d
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-')))
+        && !is_domain(d)
     {
         return Err(format!("{:?} is not a domain name", clean_line(d)));
     }
@@ -146,14 +142,43 @@ pub async fn domains(provider: String) -> Result<Vec<String>, String> {
     let p = provider_of(&provider)?;
     let name = p.name();
     drop(p);
-    tauri::async_runtime::spawn_blocking(move || provider::get(&provider)?.domains())
+    let list = tauri::async_runtime::spawn_blocking(move || provider::get(&provider)?.domains())
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| {
-            format!(
+            clean_line(&format!(
                 "Couldn't load {name}'s domains: {e}. Try again, or leave the domain on automatic."
-            )
-        })
+            ))
+        })?;
+    Ok(shown_domains(list))
+}
+
+/// The provider's domain list as the picker shows it: only names
+/// `create_inbox` would take (so nothing invisible or reordering), lower
+/// case, each once.
+fn shown_domains(list: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for d in list {
+        let d = d.trim().to_ascii_lowercase();
+        if is_domain(&d) {
+            push_new(&mut out, d);
+        }
+    }
+    out
+}
+
+/// Adds `s` unless the list has it already.
+pub fn push_new(list: &mut Vec<String>, s: String) {
+    if !list.contains(&s) {
+        list.push(s);
+    }
+}
+
+fn is_domain(d: &str) -> bool {
+    d.len() <= 253
+        && d.contains('.')
+        && d.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
 }
 
 #[tauri::command]
@@ -499,7 +524,20 @@ mod tests {
         assert!(ok(None, Some("x.com/evil"), None).is_err());
         assert!(ok(None, None, Some(&"x".repeat(65))).is_err());
         let (_, label) = ok(None, None, Some("a\u{1b}[2Jb\nc")).unwrap();
-        assert_eq!(label.as_deref(), Some("a[2Jb c"));
+        assert_eq!(label.as_deref(), Some("ab c"));
+    }
+
+    #[test]
+    fn provider_domains_are_shown_only_as_domain_names() {
+        let list = vec![
+            "fldubai.com".into(),
+            " X.ORG ".into(),
+            "x.org".into(),
+            "evil\u{202e}moc.com".into(),
+            "a\u{1b}[31m.com".into(),
+            "nodot".into(),
+        ];
+        assert_eq!(shown_domains(list), ["fldubai.com", "x.org"]);
     }
 
     #[test]

@@ -372,6 +372,8 @@ pub async fn save_attachment(
                 ),
                 _ => format!("Couldn't save {shown}: {e}"),
             })?;
+        // Marked as from the internet, as a browser would (Windows, macOS).
+        tmpmail::store::mark_from_internet(&file, &path);
         if let Err(e) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
             // Not a half-written file left behind under the chosen name.
             drop(file);

@@ -529,8 +529,8 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    opaque origin) blocks them again and makes any IPC call come from `null`; and if all of
    that failed, the caller check refuses every command from a frame.
 6. Privileged work happens in Rust commands: the clipboard (`tauri-plugin-clipboard-manager`),
-   the save dialog (`tauri-plugin-dialog`, then `std::fs::write` to a new file under a
-   sanitized name), the opener, notifications (`tauri-plugin-notification`; on Linux D-Bus, `freedesktop.rs`), the tray and
+   the save dialog (`tauri-plugin-dialog`, then a new file under a sanitized name, marked
+   as downloaded from the internet on Windows and macOS, as drag-out files are on macOS), the opener, notifications (`tauri-plugin-notification`; on Linux D-Bus, `freedesktop.rs`), the tray and
    dragging files out. The page has **no** plugin permission, only the app's
    own commands, each listed in `capabilities/main.json` and `build.rs`
    (`AppManifest::commands`).

@@ -1028,6 +1028,7 @@ impl App {
                     let (path, mut file) = create_unique(&out_dir.join(&name)).map_err(|e| {
                         anyhow::anyhow!("cannot create {}: {e}", out_dir.join(&name).display())
                     })?;
+                    crate::store::mark_from_internet(&file, &path);
                     if let Err(e) = file.write_all(&data) {
                         drop(file);
                         let _ = std::fs::remove_file(&path);

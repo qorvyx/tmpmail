@@ -350,6 +350,53 @@ pub fn write_private(path: &Path, data: &[u8]) -> Result<()> {
     written
 }
 
+/// Marks a file saved from a mail as downloaded from the internet, as
+/// browsers and mail clients do, so the system treats it with care when it
+/// is opened: on Windows a `Zone.Identifier` stream (zone 3, the internet:
+/// SmartScreen, Office's Protected View), on macOS the
+/// `com.apple.quarantine` attribute (Gatekeeper checks it on first open).
+/// Nothing elsewhere. Call it on the new file, open, before writing to it,
+/// so it is never on disk unmarked (on macOS the attribute goes on the open
+/// file itself). Best effort: a file system without streams or attributes
+/// (FAT, some network shares) just doesn't get the mark.
+pub fn mark_from_internet(file: &fs::File, path: &Path) {
+    #[cfg(windows)]
+    {
+        let mut stream = path.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        let _ = fs::write(stream, "[ZoneTransfer]\r\nZoneId=3\r\n");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::fd::AsRawFd;
+        let _ = path;
+        let Ok(name) = std::ffi::CString::new("com.apple.quarantine") else {
+            return;
+        };
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        // Flags 0081: downloaded, not yet opened; then the time and the agent.
+        let value = format!("0081;{secs:x};tmpmail;");
+        // SAFETY: the fd is open for the call; the name is NUL-terminated;
+        // the value pointer and length describe `value`'s bytes.
+        unsafe {
+            libc::fsetxattr(
+                file.as_raw_fd(),
+                name.as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+                0,
+            );
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = file;
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let _ = path;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,5 +602,43 @@ mod tests {
             .map(|e| e.file_name())
             .collect();
         assert_eq!(names.len(), 2, "{names:?}");
+    }
+
+    #[test]
+    fn saved_files_are_marked_as_from_the_internet() {
+        // Security review B11 (the mark exists on Windows and macOS only).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("invoice.pdf");
+        let mut f = fs::File::create(&path).unwrap();
+        mark_from_internet(&f, &path);
+        f.write_all(b"x").unwrap();
+        drop(f);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "x");
+        #[cfg(windows)]
+        {
+            let mut stream = path.as_os_str().to_owned();
+            stream.push(":Zone.Identifier");
+            assert!(fs::read_to_string(stream).unwrap().contains("ZoneId=3"));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+            let name = std::ffi::CString::new("com.apple.quarantine").unwrap();
+            let mut buf = [0u8; 128];
+            // SAFETY: NUL-terminated strings, and a buffer of the given size.
+            let n = unsafe {
+                libc::getxattr(
+                    c_path.as_ptr(),
+                    name.as_ptr(),
+                    buf.as_mut_ptr().cast(),
+                    buf.len(),
+                    0,
+                    0,
+                )
+            };
+            assert!(n > 0, "no quarantine attribute");
+            assert!(buf[..n as usize].starts_with(b"0081;"));
+        }
     }
 }

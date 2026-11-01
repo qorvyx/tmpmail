@@ -136,6 +136,8 @@ impl Files {
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut open, 0o600);
         let mut file = open.open(&path).map_err(fail)?;
+        // Marked as from the internet (macOS), as Save marks it.
+        tmpmail::store::mark_from_internet(&file, &path);
         if let Err(e) = std::io::Write::write_all(&mut file, bytes) {
             drop(file);
             let _ = std::fs::remove_file(&path);

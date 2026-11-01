@@ -97,6 +97,8 @@ what breaks:
   The mail and source documents carry their own `sandbox` and `frame-ancestors` policy, so
   they are sandboxed wherever they are loaded. Drag-out files left by a crashed run are
   deleted at the next start.
+- **Security: saved attachments are marked as downloaded** on Windows (`Zone.Identifier`)
+  and macOS (`com.apple.quarantine`), so the system checks them as it does a browser's.
 
 ## What's new in 0.1.3
 

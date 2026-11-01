@@ -1025,8 +1025,11 @@ impl App {
             for (n, att) in selected.iter().enumerate() {
                 let name = safe_filename(&att.filename, &format!("attachment-{}", n + 1));
                 let result = p.attachment(inbox, &msg, att).and_then(|data| {
-                    let path = unique_path(&out_dir.join(&name));
-                    if let Err(e) = std::fs::write(&path, &data) {
+                    let (path, mut file) = create_unique(&out_dir.join(&name)).map_err(|e| {
+                        anyhow::anyhow!("cannot create {}: {e}", out_dir.join(&name).display())
+                    })?;
+                    if let Err(e) = file.write_all(&data) {
+                        drop(file);
                         let _ = std::fs::remove_file(&path);
                         return Err(anyhow::anyhow!("cannot write {}: {e}", path.display()).into());
                     }
@@ -1426,24 +1429,40 @@ fn human_size(n: u64) -> String {
     }
 }
 
-/// `file.pdf` -> `file (1).pdf` if it already exists.
-fn unique_path(path: &std::path::Path) -> std::path::PathBuf {
-    if !path.exists() {
-        return path.to_path_buf();
-    }
+/// Creates `path` as a new file, or `name (1).ext`, `name (2).ext`, ... if
+/// that name is taken. Each is created with `O_EXCL` (and `O_NOFOLLOW` on
+/// Unix: `O_EXCL` alone already refuses a link, this says it twice), so
+/// nothing that is already there is written through or over, a link put in
+/// the folder included, and no check can be raced. A name taken by
+/// something that can't be opened (a folder, on Windows) is passed over
+/// too.
+fn create_unique(path: &std::path::Path) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
     let ext = path.extension().and_then(|s| s.to_str());
-    for n in 1.. {
-        let name = match ext {
-            Some(e) => format!("{stem} ({n}).{e}"),
-            None => format!("{stem} ({n})"),
+    for n in 0..10_000 {
+        let candidate = match (n, ext) {
+            (0, _) => path.to_path_buf(),
+            (_, Some(e)) => path.with_file_name(format!("{stem} ({n}).{e}")),
+            (_, None) => path.with_file_name(format!("{stem} ({n})")),
         };
-        let candidate = path.with_file_name(name);
-        if !candidate.exists() {
-            return candidate;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.custom_flags(libc::O_NOFOLLOW);
+        }
+        match opts.open(&candidate) {
+            Ok(f) => return Ok((candidate, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) if std::fs::symlink_metadata(&candidate).is_ok() => {}
+            Err(e) => return Err(e),
         }
     }
-    unreachable!()
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "every name up to (9999) is taken",
+    ))
 }
 
 #[cfg(test)]
@@ -2048,9 +2067,24 @@ mod tests {
     fn unique_paths_do_not_overwrite() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("a.txt");
-        assert_eq!(unique_path(&p), p);
-        std::fs::write(&p, "x").unwrap();
-        assert_eq!(unique_path(&p), dir.path().join("a (1).txt"));
+        assert_eq!(create_unique(&p).unwrap().0, p);
+        assert_eq!(create_unique(&p).unwrap().0, dir.path().join("a (1).txt"));
+        assert_eq!(create_unique(&p).unwrap().0, dir.path().join("a (2).txt"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn saving_never_follows_a_planted_link() {
+        // Security review B2: a dangling link named like the attachment
+        // (another user's, in a shared folder) isn't written through.
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("victim-rc");
+        let planted = dir.path().join("invoice.pdf");
+        std::os::unix::fs::symlink(&target, &planted).unwrap();
+        let (path, mut f) = create_unique(&planted).unwrap();
+        f.write_all(b"attacker bytes").unwrap();
+        assert_eq!(path, dir.path().join("invoice (1).pdf"));
+        assert!(!target.exists());
     }
 
     #[test]

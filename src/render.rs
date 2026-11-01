@@ -399,8 +399,18 @@ pub fn escape_html(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// Safe basename for saving an attachment: no path separators, no leading
-/// dots, no control characters.
+/// The longest name [`safe_filename`] gives, in bytes: under the 255 of
+/// most file systems, with room for the ` (9999)` a saver adds to a name
+/// that is taken.
+const MAX_FILENAME: usize = 240;
+
+/// Safe basename for saving an attachment: the last path component only,
+/// no control or invisible characters, none of `: * ? " < > |` (Windows),
+/// no leading `.` (a hidden file) or `-` (read as an option by `rm *` or
+/// `tar *`), no trailing dot or space (Windows drops them), not a Windows
+/// device name (`CON`, `NUL`, `COM1.txt`...: those go to the device), and
+/// at most [`MAX_FILENAME`] bytes with the extension kept. `fallback` when
+/// nothing is left.
 pub fn safe_filename(name: &str, fallback: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or_default();
     let cleaned: String = clean_line(base)
@@ -413,12 +423,57 @@ pub fn safe_filename(name: &str, fallback: &str) -> String {
             }
         })
         .collect();
-    let trimmed = cleaned.trim().trim_start_matches('.').trim();
+    let trimmed = cleaned
+        .trim_start_matches(|c: char| c == '.' || c.is_whitespace())
+        .trim_end_matches(|c: char| c == '.' || c.is_whitespace());
     if trimmed.is_empty() {
-        fallback.to_string()
-    } else {
-        trimmed.chars().take(200).collect()
+        return fallback.to_string();
     }
+    let mut out = match trimmed.strip_prefix('-') {
+        Some(rest) => format!("_{rest}"),
+        None => trimmed.to_string(),
+    };
+    let stem = out.split('.').next().unwrap_or_default().trim_end();
+    if is_device_name(stem) {
+        out.insert(0, '_');
+    }
+    if out.len() > MAX_FILENAME {
+        // Keep a short extension; cut the rest on a character boundary.
+        let ext = out
+            .rfind('.')
+            .filter(|&i| i > 0 && out.len() - i <= 16)
+            .map(|i| out[i..].to_string())
+            .unwrap_or_default();
+        let mut cut = MAX_FILENAME - ext.len();
+        while !out.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        out = format!("{}{ext}", out[..cut].trim_end_matches(['.', ' ']));
+    }
+    out
+}
+
+/// Whether `stem` names a Windows device (any case): `CON`, `PRN`, `AUX`,
+/// `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9` (and their superscript-digit
+/// forms), `CONIN$`, `CONOUT$`.
+fn is_device_name(stem: &str) -> bool {
+    if ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
+        .iter()
+        .any(|d| stem.eq_ignore_ascii_case(d))
+    {
+        return true;
+    }
+    let (Some(prefix), Some(rest)) = (stem.get(..3), stem.get(3..)) else {
+        return false;
+    };
+    let mut rest = rest.chars();
+    ["COM", "LPT"]
+        .iter()
+        .any(|p| prefix.eq_ignore_ascii_case(p))
+        && rest
+            .next()
+            .is_some_and(|c| c.is_ascii_digit() || matches!(c, '\u{B9}' | '\u{B2}' | '\u{B3}'))
+        && rest.next().is_none()
 }
 
 #[cfg(test)]
@@ -619,5 +674,34 @@ mod tests {
         assert_eq!(safe_filename("...", "fallback"), "fallback");
         assert_eq!(safe_filename(".bashrc", "f"), "bashrc");
         assert_eq!(safe_filename("a:b?.txt", "f"), "a_b_.txt");
+    }
+
+    #[test]
+    fn filenames_are_safe_on_every_system() {
+        // Security review B7.
+        for (name, safe) in [
+            ("CON", "_CON"),
+            ("nul.txt", "_nul.txt"),
+            ("COM1.pdf", "_COM1.pdf"),
+            ("lpt9", "_lpt9"),
+            ("com\u{B9}.txt", "_com\u{B9}.txt"),
+            ("CONOUT$", "_CONOUT$"),
+            ("console.txt", "console.txt"),
+            ("COM10.txt", "COM10.txt"),
+            ("-rf", "_rf"),
+            (
+                "--checkpoint-action=exec=sh x.sh",
+                "_-checkpoint-action=exec=sh x.sh",
+            ),
+            ("report.pdf. . ", "report.pdf"),
+            ("a.txt:evil", "a.txt_evil"),
+            (". .bashrc", "bashrc"),
+        ] {
+            assert_eq!(safe_filename(name, "f"), safe, "{name:?}");
+        }
+        let long = format!("{}.pdf", "\u{e9}".repeat(200));
+        let cut = safe_filename(&long, "f");
+        assert!(cut.len() <= MAX_FILENAME && cut.ends_with(".pdf"), "{cut}");
+        assert!(cut.starts_with('\u{e9}'));
     }
 }

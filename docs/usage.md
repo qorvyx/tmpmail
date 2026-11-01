@@ -257,7 +257,7 @@ Supported by mail.tm, mail.gw, DropMail and Guerrilla.
 |---|---|---|
 | `ID` | | Which message (required). |
 | `ATTACHMENTS...` | | Attachment ids or file names to save. All of them if omitted. |
-| `--output DIR` | `-o` | Folder to save into. Default: current folder. Existing files are never overwritten; a `(1)` is added instead. |
+| `--output DIR` | `-o` | Folder to save into. Default: current folder. Existing files are never overwritten; a `(1)` is added instead. Each file is created new (`O_EXCL`, and `O_NOFOLLOW` on Unix), so a link someone put in the folder under the attachment's name is never written through. Names are cleaned: only the last path component, no control or invisible characters, no `: * ? " < > \|`, no leading `.` or `-` (a leading `-` becomes `_`, so `rm *` can't read it as an option), no trailing dots or spaces, Windows device names (`CON`, `NUL`, `COM1.txt`...) get a `_` in front, and at most 240 bytes, keeping the extension. |
 
 An attachment the provider can't serve doesn't stop the others (mail.tm, for one, refuses one
 whose name contains `/`): the saved ones are printed, each failure is told on stderr (`failed`

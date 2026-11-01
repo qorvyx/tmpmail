@@ -487,7 +487,8 @@ config keys: a bad value (`TMPMAIL_HTTP_TIMEOUT=0`, `=x`) is a usage error.
   refused, and the state folder used instead), and only tmpmail's own `tmpmail-*.html`
   copies there are ever deleted.
 - Attachment names are sanitized so they can't escape the target directory, and
-  existing files are never overwritten.
+  existing files are never overwritten (nor written through a link put in their place);
+  Windows device names such as `CON` get a `_` in front, and a leading `-` becomes `_`.
 - `tmpmail mcp` hands message contents to an AI agent. Anyone can mail a temp address, so
   treat what the agent reads there as untrusted input.
 - No telemetry. The only network traffic is to the provider you use.

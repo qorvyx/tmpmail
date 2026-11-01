@@ -72,6 +72,10 @@ what breaks:
   attachment under a thousand `cid:` names and make the app fetch and keep it a thousand
   times. Images are now kept by the attachment they are (fetched once), at most 64 names
   are looked up per message, and at most 25 MiB of images are shown for it.
+- **Security: safer saved names.** A suggested name that is a Windows device name (`CON`,
+  `NUL`, `COM1.pdf`...) gets a `_` in front, a leading `-` becomes `_`, trailing dots and
+  spaces go, and a long name is cut at 240 bytes keeping its extension. Drag-out files are
+  created new, never written through anything already in their place.
 
 ## What's new in 0.1.3
 

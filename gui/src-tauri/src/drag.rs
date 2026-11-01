@@ -78,12 +78,23 @@ impl Files {
             Err(e) => return Err(fail(e)),
         }
         let path = sub.join(name);
+        // A file from an earlier drag of it goes first; the new one is
+        // created new, which never follows a link (as the CLI's `save`).
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(fail(e)),
+        }
         let mut open = std::fs::OpenOptions::new();
-        open.write(true).create(true).truncate(true);
+        open.write(true).create_new(true);
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut open, 0o600);
         let mut file = open.open(&path).map_err(fail)?;
-        std::io::Write::write_all(&mut file, bytes).map_err(fail)?;
+        if let Err(e) = std::io::Write::write_all(&mut file, bytes) {
+            drop(file);
+            let _ = std::fs::remove_file(&path);
+            return Err(fail(e));
+        }
         drop(dir);
         self.ready
             .lock()

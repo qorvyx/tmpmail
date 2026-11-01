@@ -82,10 +82,9 @@ browser; `watch --notify` uses `notify-send` on Linux; long messages open in `le
 
 ### Desktop app
 
-Download it from the [desktop app's releases](https://github.com/qorvyx/tmpmail/releases?q=desktop&expanded=true)
-(the ones titled "tmpmail desktop", for example
-[gui-v0.1.3](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.3)). The release marked
-"Latest" is the command-line tool's and has no `.deb`, `.rpm` or `.AppImage`.
+**[Download the desktop app (version 0.1.3)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.3)**,
+then pick the file for your system. (The release GitHub marks "Latest" is the command-line
+tool's, which has no `.deb`, `.rpm`, `.AppImage`, `.dmg` or `.exe`.)
 
 | System | File | How to install |
 |---|---|---|

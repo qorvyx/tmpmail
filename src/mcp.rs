@@ -130,13 +130,21 @@ fn call(params: &Value, global: &Global, cancel: Arc<AtomicBool>) -> RpcResult {
         .get("name")
         .and_then(Value::as_str)
         .ok_or((-32602, "missing tool name".to_string()))?;
-    let args = params.get("arguments").cloned().unwrap_or(json!({}));
-    if !tools().iter().any(|t| t["name"] == name) {
+    let args = params
+        .get("arguments")
+        .filter(|a| !a.is_null())
+        .cloned()
+        .unwrap_or(json!({}));
+    let Some(tool) = tools().into_iter().find(|t| t["name"] == name) else {
         return Err((-32602, format!("unknown tool: {name}")));
-    }
-    let outcome = App::new(global.clone()).and_then(|mut app| {
-        app.cancel_on(cancel);
-        Server { app: &mut app }.run_tool(name, args)
+    };
+    // A bad argument is the tool's error (`isError`), so the model sees it
+    // and can retry, as the spec asks for input validation errors.
+    let outcome = check_arguments(&tool, &args).and_then(|()| {
+        App::new(global.clone()).and_then(|mut app| {
+            app.cancel_on(cancel);
+            Server { app: &mut app }.run_tool(name, args)
+        })
     });
     Ok(match outcome {
         Ok(v) => json!({
@@ -157,17 +165,16 @@ struct Server<'a> {
 
 impl Server<'_> {
     fn run_tool(&mut self, name: &str, args: Value) -> Result<Value> {
-        match name {
-            "create_inbox" => self.create_inbox(parse(args)?),
-            "list_inboxes" => Ok(self.list_inboxes()),
-            "list_messages" => self.list_messages(parse(args)?),
-            "read_message" => self.read_message(parse(args)?),
-            "wait_for_message" => self.wait_for_message(parse(args)?),
-            "get_verification_code" => self.get_code(parse(args)?),
-            "get_links" => self.get_links(parse(args)?),
-            "delete_message" => self.delete_message(parse(args)?),
-            "delete_inbox" => self.delete_inbox(parse(args)?),
-            _ => unreachable!("checked in call"),
+        match parse_call(name, args)? {
+            Call::CreateInbox(a) => self.create_inbox(a),
+            Call::ListInboxes => Ok(self.list_inboxes()),
+            Call::ListMessages(a) => self.list_messages(a),
+            Call::ReadMessage(a) => self.read_message(a),
+            Call::WaitForMessage(a) => self.wait_for_message(a),
+            Call::GetCode(a) => self.get_code(a),
+            Call::GetLinks(a) => self.get_links(a),
+            Call::DeleteMessage(a) => self.delete_message(a),
+            Call::DeleteInbox(a) => self.delete_inbox(a),
         }
     }
 
@@ -238,7 +245,7 @@ impl Server<'_> {
         let (msg, id) = self.app.message_at(n, a.id.as_deref())?;
         self.app.mark_read_noting(n, &id);
         let inbox = self.app.state.inboxes[n].address.clone();
-        Ok(message_json(&inbox, &msg, a.include_html))
+        Ok(message_json(&inbox, &msg, a.include_html.unwrap_or(false)))
     }
 
     /// Runs the CLI's `wait` loop on one inbox with an agent-sized timeout.
@@ -263,7 +270,7 @@ impl Server<'_> {
 
     fn wait_for_message(&mut self, a: WaitOnly) -> Result<Value> {
         let (inbox, msg, _, ()) = self.wait(&a.wait, |_, _| Some(()))?;
-        Ok(message_json(&inbox, &msg, a.include_html))
+        Ok(message_json(&inbox, &msg, a.include_html.unwrap_or(false)))
     }
 
     fn get_code(&mut self, a: CodeArgs) -> Result<Value> {
@@ -368,6 +375,72 @@ fn error_reply(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
+/// Refuses an argument the tool's schema doesn't list, naming it: a
+/// misspelled one (`username` for `user`) must not be quietly dropped.
+fn check_arguments(tool: &Value, args: &Value) -> Result<()> {
+    let Some(args) = args.as_object() else {
+        return Err(Error::Usage(
+            "invalid arguments: expected an object of named arguments".into(),
+        ));
+    };
+    let empty = serde_json::Map::new();
+    let known = tool["inputSchema"]["properties"]
+        .as_object()
+        .unwrap_or(&empty);
+    let unknown: Vec<&str> = args
+        .keys()
+        .filter(|k| !known.contains_key(*k))
+        .map(String::as_str)
+        .collect();
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    let takes = if known.is_empty() {
+        "it takes no arguments".to_string()
+    } else {
+        let names: Vec<&str> = known.keys().map(String::as_str).collect();
+        format!("it takes {}", names.join(", "))
+    };
+    Err(Error::Usage(format!(
+        "unknown argument{} {} for {}; {takes}",
+        if unknown.len() == 1 { "" } else { "s" },
+        unknown
+            .iter()
+            .map(|k| format!("{k:?}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        tool["name"].as_str().unwrap_or("this tool"),
+    )))
+}
+
+/// A tool call with its arguments parsed.
+enum Call {
+    CreateInbox(CreateArgs),
+    ListInboxes,
+    ListMessages(InboxArg),
+    ReadMessage(MessageArgs),
+    WaitForMessage(WaitOnly),
+    GetCode(CodeArgs),
+    GetLinks(LinksArgs),
+    DeleteMessage(DeleteMessageArgs),
+    DeleteInbox(RequiredInbox),
+}
+
+fn parse_call(name: &str, args: Value) -> Result<Call> {
+    Ok(match name {
+        "create_inbox" => Call::CreateInbox(parse(args)?),
+        "list_inboxes" => Call::ListInboxes,
+        "list_messages" => Call::ListMessages(parse(args)?),
+        "read_message" => Call::ReadMessage(parse(args)?),
+        "wait_for_message" => Call::WaitForMessage(parse(args)?),
+        "get_verification_code" => Call::GetCode(parse(args)?),
+        "get_links" => Call::GetLinks(parse(args)?),
+        "delete_message" => Call::DeleteMessage(parse(args)?),
+        "delete_inbox" => Call::DeleteInbox(parse(args)?),
+        _ => unreachable!("checked in call"),
+    })
+}
+
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T> {
     serde_json::from_value(args).map_err(|e| Error::Usage(format!("invalid arguments: {e}")))
 }
@@ -415,8 +488,7 @@ struct RequiredInbox {
 struct MessageArgs {
     inbox: Option<String>,
     id: Option<String>,
-    #[serde(default)]
-    include_html: bool,
+    include_html: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -439,8 +511,7 @@ struct WaitArgs {
 struct WaitOnly {
     #[serde(flatten)]
     wait: WaitArgs,
-    #[serde(default)]
-    include_html: bool,
+    include_html: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -499,7 +570,7 @@ fn tools() -> Vec<Value> {
             "title": "Create inbox",
             "description": "Create a new disposable email address. Falls back to the next \
                             provider when one is down. Returns the address to use.",
-            "inputSchema": { "type": "object", "properties": {
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": {
                 "provider": { "type": "string", "enum": provider::all().collect::<Vec<_>>(),
                               "description": "Force one provider (default: first that works)." },
                 "user": { "type": "string", "description": "Local part to ask for (random if omitted)." },
@@ -512,14 +583,14 @@ fn tools() -> Vec<Value> {
             "name": "list_inboxes",
             "title": "List inboxes",
             "description": "List stored inboxes with provider and expiry.",
-            "inputSchema": { "type": "object", "properties": {} },
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
             "annotations": { "readOnlyHint": true },
         }),
         json!({
             "name": "list_messages",
             "title": "List messages",
             "description": "List the messages in an inbox, newest first.",
-            "inputSchema": { "type": "object", "properties": { "inbox": inbox } },
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": { "inbox": inbox } },
             "annotations": read_only,
         }),
         json!({
@@ -527,7 +598,7 @@ fn tools() -> Vec<Value> {
             "title": "Read message",
             "description": "Read one message as text, with its links (verification links first) \
                             and attachment names.",
-            "inputSchema": { "type": "object", "properties": {
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": {
                 "inbox": inbox, "id": id,
                 "include_html": { "type": "boolean", "description": "Also return the raw HTML." },
             }},
@@ -537,7 +608,7 @@ fn tools() -> Vec<Value> {
             "name": "wait_for_message",
             "title": "Wait for message",
             "description": "Block until a message matching the filters arrives, then return it.",
-            "inputSchema": { "type": "object", "properties": with(json!({
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": with(json!({
                 "include_html": { "type": "boolean", "description": "Also return the raw HTML." },
             }))},
             "annotations": read_only,
@@ -547,7 +618,7 @@ fn tools() -> Vec<Value> {
             "title": "Get verification code",
             "description": "Get the one-time code (OTP) from a message. Without `id`, waits for \
                             a message that contains one.",
-            "inputSchema": { "type": "object", "properties": with(json!({
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": with(json!({
                 "id": id,
                 "regex": { "type": "string", "description": "Custom regex; its first capture group \
                                                            (or the whole match) is the code." },
@@ -559,7 +630,7 @@ fn tools() -> Vec<Value> {
             "title": "Get links",
             "description": "Get the links from a message, verification and magic-login links \
                             first. Without `id`, waits for a message that has a matching link.",
-            "inputSchema": { "type": "object", "properties": with(json!({
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": with(json!({
                 "id": id,
                 "match": { "type": "string", "description": "Regex links must match (case-insensitive)." },
             }))},
@@ -569,7 +640,7 @@ fn tools() -> Vec<Value> {
             "name": "delete_message",
             "title": "Delete message",
             "description": "Delete one message.",
-            "inputSchema": { "type": "object", "required": ["id"], "properties": {
+            "inputSchema": { "type": "object", "additionalProperties": false, "required": ["id"], "properties": {
                 "inbox": inbox, "id": id,
             }},
             "annotations": { "destructiveHint": true, "openWorldHint": true },
@@ -578,7 +649,7 @@ fn tools() -> Vec<Value> {
             "name": "delete_inbox",
             "title": "Delete inbox",
             "description": "Delete an inbox at its provider and forget it.",
-            "inputSchema": { "type": "object", "required": ["inbox"], "properties": {
+            "inputSchema": { "type": "object", "additionalProperties": false, "required": ["inbox"], "properties": {
                 "inbox": { "type": "string", "description": "Inbox address or label." },
             }},
             "annotations": { "destructiveHint": true, "openWorldHint": true },
@@ -639,6 +710,76 @@ mod tests {
         cancel(json!(7));
         cancel(json!("a"));
         assert!(num.load(Ordering::Relaxed) && text.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn every_listed_argument_is_accepted_and_no_other() {
+        for tool in tools() {
+            let name = tool["name"].as_str().unwrap();
+            let props = tool["inputSchema"]["properties"].as_object().unwrap();
+            assert_eq!(tool["inputSchema"]["additionalProperties"], false, "{name}");
+            // Every argument the schema lists, set at once.
+            let all: serde_json::Map<String, Value> = props
+                .iter()
+                .map(|(k, p)| {
+                    let v = match (p["type"].as_str(), p.get("enum")) {
+                        (_, Some(e)) => e[0].clone(),
+                        (Some("integer"), _) => json!(5),
+                        (Some("boolean"), _) => json!(true),
+                        _ => json!("x"),
+                    };
+                    (k.clone(), v)
+                })
+                .collect();
+            let all = Value::Object(all);
+            check_arguments(&tool, &all).unwrap_or_else(|e| panic!("{name}: {e}"));
+            if let Err(e) = parse_call(name, all.clone()) {
+                panic!("{name}: {e}");
+            }
+            // Null is the same as leaving one out.
+            for k in props.keys() {
+                let mut one = all.clone();
+                one[k] = Value::Null;
+                let required = tool["inputSchema"]["required"]
+                    .as_array()
+                    .is_some_and(|r| r.contains(&json!(k)));
+                assert_eq!(parse_call(name, one).is_ok(), !required, "{name} {k}");
+            }
+            // One more is refused, by name.
+            let mut extra = all;
+            extra["username"] = json!("x");
+            let err = check_arguments(&tool, &extra).unwrap_err();
+            assert!(matches!(err, Error::Usage(_)), "{name}");
+            assert!(err.to_string().contains("\"username\""), "{name}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_misspelled_argument_is_a_tool_error_naming_it() {
+        let global = Global::default();
+        let params = json!({ "name": "create_inbox",
+                             "arguments": { "provider": "guerrilla", "username": "gm1" } });
+        // Refused before anything is created (no App, no request).
+        let out = call(&params, &global, Arc::new(AtomicBool::new(false))).unwrap();
+        assert_eq!(out["isError"], true);
+        let text = out["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("unknown argument \"username\" for create_inbox"),
+            "{text}"
+        );
+        assert!(
+            text.contains("domain, label, provider, user") && text.ends_with("(usage)"),
+            "{text}"
+        );
+        let params = json!({ "name": "list_inboxes", "arguments": { "all": true } });
+        let out = call(&params, &global, Arc::new(AtomicBool::new(false))).unwrap();
+        let text = out["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("it takes no arguments"), "{text}");
+        // Positional arguments aren't read as named ones.
+        let params = json!({ "name": "delete_inbox", "arguments": ["a@x.com"] });
+        let out = call(&params, &global, Arc::new(AtomicBool::new(false))).unwrap();
+        let text = out["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("expected an object"), "{text}");
     }
 
     #[test]

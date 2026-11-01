@@ -375,6 +375,12 @@ tools take `timeout` (default 120 s, at most 600 s, since clients give up on lon
 triggers the mail before it calls the tool, and must not miss it. As in the CLI, the newest
 matching message already there wins. Pass `false` to wait for new mail only.
 
+An argument a tool doesn't list in its schema (`tools/list`, where each schema has
+`"additionalProperties": false`) is refused with a tool error (`isError`, kind `usage`) that
+names it and lists the ones the tool takes, so a misspelled `username` for `user` isn't
+quietly dropped. Omitted or `null` `arguments` mean none, a `null` argument is the same as leaving it
+out, and `arguments` that aren't an object (a list) are refused.
+
 Mail comes from anyone who knows the address. The server tells the client to treat message
 contents as untrusted data, but an agent that acts on mail can still be steered by it.
 

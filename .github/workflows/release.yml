@@ -38,6 +38,14 @@ jobs:
             exit 1
           fi
           echo "Tag $GITHUB_REF_NAME matches Cargo.toml"
+      # The README names the released version (the attestation example, the
+      # install URL and its tar path, the library's `version = "X.Y"`).
+      # Between releases it rightly still names the last one, so this only
+      # runs on a tag, where every one of them must be the tag's version.
+      - name: README names the tag's version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: ./scripts/check-readme-version.sh "${GITHUB_REF_NAME#v}" README.md
   build:
     needs: version
     strategy:

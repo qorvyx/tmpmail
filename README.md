@@ -58,9 +58,9 @@ different program. With [cargo-binstall](https://github.com/cargo-bins/cargo-bin
 **Download on Linux** (x86_64; for ARM use `aarch64` in place of `x86_64`):
 
 ```sh
-curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.4/tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz
-tar xzf tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz
-install -D -t ~/.local/bin tmpmail-0.3.4-x86_64-unknown-linux-musl/tmpmail
+curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.5/tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz
+tar xzf tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz
+install -D -t ~/.local/bin tmpmail-0.3.5-x86_64-unknown-linux-musl/tmpmail
 ```
 
 <details>
@@ -70,7 +70,7 @@ Each release has a `SHA256SUMS` file, and every file has a GitHub build attestat
 it was built from this repository:
 
 ```sh
-gh attestation verify tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
+gh attestation verify tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
   --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml
 ```
 
@@ -82,7 +82,7 @@ browser; `watch --notify` uses `notify-send` on Linux; long messages open in `le
 
 ### Desktop app
 
-**[Download the desktop app (version 0.1.3)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.3)**,
+**[Download the desktop app (version 0.1.4)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.4)**,
 then pick the file for your system. (The release GitHub marks "Latest" is the command-line
 tool's, which has no `.deb`, `.rpm`, `.AppImage`, `.dmg` or `.exe`.)
 
@@ -112,7 +112,7 @@ tool's, which has no `.deb`, `.rpm`, `.AppImage`, `.dmg` or `.exe`.)
 - On NVIDIA, if the window stays blank, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 - Uninstalling keeps your settings and inboxes, since the command-line tool shares them.
   [How to remove everything](gui/README.md#removing-it).
-- If you use the command-line tool too, use version 0.3.0 or later.
+- If you use the command-line tool too, use version 0.3.2 or later.
 - Each release has `SHA256SUMS` and build attestations
   (`gh attestation verify FILE --repo qorvyx/tmpmail --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`).
 - To run it from source (Rust 1.90+, Node 24, pnpm): `cd gui && pnpm install && pnpm tauri dev`.
@@ -289,11 +289,11 @@ In GitHub Actions:
 - name: Install tmpmail
   run: |
     mkdir -p ~/.local/bin && cd "$RUNNER_TEMP"
-    curl -sSfL -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.4/tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz \
-      -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.4/SHA256SUMS
+    curl -sSfL -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.5/tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz \
+      -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.5/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
-    tar xzf tmpmail-0.3.4-x86_64-unknown-linux-musl.tar.gz --strip-components=1 \
-      -C ~/.local/bin tmpmail-0.3.4-x86_64-unknown-linux-musl/tmpmail
+    tar xzf tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz --strip-components=1 \
+      -C ~/.local/bin tmpmail-0.3.5-x86_64-unknown-linux-musl/tmpmail
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 - name: Sign-up test

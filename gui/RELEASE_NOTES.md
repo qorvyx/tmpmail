@@ -1,13 +1,12 @@
-tmpmail desktop 0.1.3 brings the library fixes of the `tmpmail` command-line tool 0.3.3 and
-0.3.4 that show in the app: decoded sender names and subjects, labels that always pick one
-inbox, and a clearer error when a domain isn't offered. (Their TUI and MCP fixes don't apply
-to the app.) It is built on the same core as the `tmpmail` command-line tool (0.3.4) and
-shares its inboxes and `config.toml`.
+tmpmail desktop 0.1.4 is the first release that is no longer a preview. It fixes dragging
+attachments out on X11, inline images in mail.tm mail, a blank window in the AppImage with color
+emoji, and a narrow message pane, and it brings the security fixes of a full review of the code.
+It is built on the same core as the `tmpmail` command-line tool 0.3.5, so that release's
+fixes reach the app too (cleaner sender text, waiting through provider rate limits, headers
+labelled ISO-8859-1 read as Windows-1252), and it shares the tool's inboxes and `config.toml`.
 
-It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS
-and on Windows. Please report
-what breaks:
-<https://github.com/qorvyx/tmpmail/issues>.
+It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS and on Windows. Please report
+what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 
 ## What's new in 0.1.4
 
@@ -30,8 +29,8 @@ what breaks:
   `cid:` address in the HTML they hand out to `attachment:ID`, the id of the attachment
   they list for it, which no browser knows, so the image showed as its alt text. The app
   now reads an image's `attachment:ID` as that image attachment of the same message (only
-  that scheme, only the message's own attachments, with the usual limits on inline images). Where the
-  listing doesn't name a `cid:` image, the app finds the part with that `Content-ID` in the
+  that scheme, only the message's own attachments, with the usual limits on inline
+  images). Where the listing doesn't name a `cid:` image, the app finds the part with that `Content-ID` in the
   raw message (mail.tm, mail.gw, DropMail and Maildrop have one), and now also reads
   mail.tm's raw message, which leaves out the line break after each part's boundary.
 - **Images aren't offered as links.** A mail's remote images were listed under Links, and a
@@ -109,12 +108,12 @@ what breaks:
   inline picture.
 - **Security: hostile mail can't stall the app.** HTML past 4 MiB or nested deeper than
   1000 elements (as the HTML parser nests them) is shown as its plain text, under a note,
-  instead of being parsed (100 000 nested `<div>` took 40 s), and codes and links are found in linear time.
+  instead of being parsed, and codes and links are found in linear time.
 - **Security: size limits on provider answers.** Raw messages and attachments are read up
   to 64 MiB (JSON answers a little more), and an attachment's download address is used only
   on the provider's own site, so a hostile answer can't fill the memory or send the
   account's token elsewhere.
-- **Security: smaller hardening of the app** (C4–C7). A `mailto:` link from a mail is
+- **Security: smaller hardening of the app**. A `mailto:` link from a mail is
   rebuilt from its address, subject and body only, so `attach=` can't prefill a file from
   the disk in mail clients that honored it. A sender's name in a Linux notification's
   title can't carry markup (`<` and `>` show as `‹` and `›`) for servers that format it.
@@ -203,16 +202,17 @@ what breaks:
 
 | System | File |
 |---|---|
-| Windows 10/11 (x64) | `tmpmail-desktop-0.1.3-x64-setup.exe` |
-| macOS 10.15+ (Apple silicon and Intel) | `tmpmail-desktop-0.1.3-universal.dmg` |
-| Debian, Ubuntu (x86_64) | `tmpmail-desktop-0.1.3-amd64.deb` |
-| Fedora and other RPM-based (x86_64) | `tmpmail-desktop-0.1.3-x86_64.rpm` |
-| Other Linux (x86_64) | `tmpmail-desktop-0.1.3-x86_64.AppImage` |
+| Windows 10/11 (x64) | `tmpmail-desktop-0.1.4-x64-setup.exe` |
+| macOS 10.15+ (Apple silicon and Intel) | `tmpmail-desktop-0.1.4-universal.dmg` |
+| Debian, Ubuntu (x86_64) | `tmpmail-desktop-0.1.4-amd64.deb` |
+| Fedora and other RPM-based (x86_64) | `tmpmail-desktop-0.1.4-x86_64.rpm` |
+| Other Linux (x86_64) | `tmpmail-desktop-0.1.4-x86_64.AppImage` |
 
 Check a download against `SHA256SUMS`, or its build attestation:
 
 ```sh
-gh attestation verify tmpmail-desktop-0.1.3-x86_64.AppImage --repo qorvyx/tmpmail
+gh attestation verify tmpmail-desktop-0.1.4-x86_64.AppImage --repo qorvyx/tmpmail \
+  --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml
 ```
 
 ## Installing an unsigned app
@@ -229,8 +229,8 @@ The app isn't signed with a paid certificate, so each system warns once.
   fetches WebView2 if it's missing. If **Smart App Control** is on, it blocks the installer
   outright with no way past; it can only be turned off as a whole (Windows Security → App &
   browser control).
-- **Linux:** `sudo apt install ./tmpmail-desktop-0.1.3-amd64.deb`, or `sudo dnf install
-  ./tmpmail-desktop-0.1.3-x86_64.rpm`; both pull in WebKitGTK 4.1. The AppImage runs
+- **Linux:** `sudo apt install ./tmpmail-desktop-0.1.4-amd64.deb`, or `sudo dnf install
+  ./tmpmail-desktop-0.1.4-x86_64.rpm`; both pull in WebKitGTK 4.1. The AppImage runs
   as is after `chmod +x` (it may need `libfuse2`; without FUSE, run it with
   `--appimage-extract-and-run`). On NVIDIA, if the window stays blank, start it with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
@@ -246,6 +246,5 @@ drops the app's read marks when it rewrites an inbox.
 - Linux: the tray needs a StatusNotifier host (stock GNOME needs the AppIndicator
   extension), and clicks on the tray icon itself aren't reported, so everything is in its
   menu. Copying on pure Wayland needs a compositor with clipboard data-control support.
-- macOS: the notification permission prompt and the tray have not been tried on a real
-  Mac. An ad-hoc signed app may be asked for permissions again after each update.
+- macOS: the notification permission prompt and the tray may not work yet. An ad-hoc signed app may be asked for permissions again after each update.
 - x86_64 only on Linux and Windows for now.

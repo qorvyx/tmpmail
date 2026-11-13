@@ -1,14 +1,12 @@
-<p align="center"><img src="assets/logo.svg" alt="" width="88" height="88"></p>
+<p align="center"><img src="assets/logo.svg" alt="tmpmail logo" width="88" height="88"></p>
 
 # tmpmail
 
-**Throwaway email addresses from your terminal.** Make an address, use it to sign up
-somewhere, and get the verification code back, in one line of shell. Made for scripts,
-tests, CI and AI agents, with a terminal UI and a desktop app for everyone else.
+Disposable email from the terminal and a desktop app: make an address, get the verification code back.
 
 [![CI](https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml/badge.svg)](https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml)
 [![Providers](https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml/badge.svg)](https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml)
-[![Release](https://img.shields.io/github/v/release/qorvyx/tmpmail)](https://github.com/qorvyx/tmpmail/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/qorvyx/tmpmail)](https://github.com/qorvyx/tmpmail/releases/latest)
 [![crates.io](https://img.shields.io/crates/v/tmpmail)](https://crates.io/crates/tmpmail)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
@@ -20,8 +18,19 @@ tmpmail otp --wait --include-existing    # waits for the mail, then prints 48291
 
 ![tmpmail creating an address, waiting for a mail and printing its code and link](assets/demo.gif)
 
-It uses free public mail services (mail.tm, DropMail, Guerrilla Mail and
-[others](#providers)). If one is down, tmpmail uses the next one.
+## Highlights
+
+- **A code in one line.** `otp --wait` and `wait --link` block until the mail arrives and
+  print just the code or the link. Every command has `--json` and clear exit codes.
+- **Six free services, automatic fallback.** mail.tm, DropMail, Guerrilla Mail and
+  [others](#providers); if one is down, tmpmail uses the next.
+- **Mail arrives live**, within about a second on mail.tm and DropMail.
+- **For people too:** a full-screen terminal view and a desktop app for Linux, macOS and
+  Windows, on the same inboxes.
+- **For AI agents:** a built-in [MCP](https://modelcontextprotocol.io) server.
+- **Safe by default:** HTML mail is cleaned, remote images (trackers) are blocked, and
+  hidden characters can't change your terminal.
+- **One small program** with nothing else to install, and verifiable builds.
 
 **Contents**
 
@@ -33,29 +42,31 @@ It uses free public mail services (mail.tm, DropMail, Guerrilla Mail and
 - [AI agents](#with-an-ai-agent)
 - [Providers](#providers)
 - [Reference](#reference)
+- [When not to use tmpmail](#when-not-to-use-tmpmail)
 - [Privacy and security](#privacy-and-security)
+- [Contributing](#contributing)
 
 ## Install
 
-tmpmail works on Linux (Fedora, Debian, Ubuntu, Arch and others), macOS and Windows. There
-are two parts: the **command-line tool** (with the full-screen view and the AI agent
-server) and the **desktop app**. Install one or both; they share the same inboxes.
+tmpmail works on Linux (Fedora, Debian, Ubuntu, Arch and others), macOS and Windows. It
+comes in two parts that share the same inboxes: the **command-line tool** (with the
+full-screen view and the AI agent server) and the **desktop app**. Install one or both.
 
 ### Command-line tool
 
-It is one file with nothing else to install.
-
-| System | How to install |
-|---|---|
-| **Linux** | `brew install qorvyx/tap/tmpmail`, `cargo install --locked tmpmail`, or the download below |
-| **macOS** | `brew install qorvyx/tap/tmpmail` or `cargo install --locked tmpmail` |
-| **Windows** | `cargo install --locked tmpmail`, or download the `.zip` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest), unzip it, and put `tmpmail.exe` in a folder on your `PATH` |
+| System | Recommended | Other ways |
+|---|---|---|
+| **Linux** | `brew install qorvyx/tap/tmpmail` | `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
+| **macOS** | `brew install qorvyx/tap/tmpmail` | `cargo install --locked tmpmail`, or the `.tar.gz` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest) |
+| **Windows** | `cargo install --locked tmpmail` | the `.zip` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest): unzip it and put `tmpmail.exe` in a folder on your `PATH` |
 
 With Homebrew, use the full name `qorvyx/tap/tmpmail`: Homebrew's own `tmpmail` is a
-different program. With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall),
-`cargo binstall tmpmail` downloads the ready-made program instead of compiling it.
+different program. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can
+run `cargo binstall tmpmail` to get the ready-made program instead of compiling it.
 
-**Download on Linux** (x86_64; for ARM use `aarch64` in place of `x86_64`):
+#### Download on Linux
+
+For x86_64 (on ARM, use `aarch64` in place of `x86_64`):
 
 ```sh
 curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.5/tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz
@@ -63,28 +74,47 @@ tar xzf tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz
 install -D -t ~/.local/bin tmpmail-0.3.5-x86_64-unknown-linux-musl/tmpmail
 ```
 
-<details>
-<summary>Check a download</summary>
+#### Check a download
 
-Each release has a `SHA256SUMS` file, and every file has a GitHub build attestation proving
-it was built from this repository:
+Each release has a `SHA256SUMS` file, and every file has a GitHub build attestation that
+proves it was built from this repository:
 
 ```sh
 gh attestation verify tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
   --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml
 ```
 
-</details>
+#### Shell completions (optional)
 
-**Optional:** a few commands use tools you probably have already. `copy` uses `wl-copy`,
-`xclip` or `xsel` on Linux (`pbcopy` on macOS, `clip.exe` on Windows); `read --html` opens your
-browser; `watch --notify` uses `notify-send` on Linux; long messages open in `less`.
+```sh
+tmpmail completions bash > ~/.local/share/bash-completion/completions/tmpmail
+tmpmail completions zsh  > ~/.zfunc/_tmpmail
+tmpmail completions fish > ~/.config/fish/completions/tmpmail.fish
+```
+
+#### Upgrade and uninstall
+
+| Installed with | Upgrade | Uninstall |
+|---|---|---|
+| Homebrew | `brew upgrade qorvyx/tap/tmpmail` | `brew uninstall qorvyx/tap/tmpmail` |
+| cargo | `cargo install --locked tmpmail` | `cargo uninstall tmpmail` |
+| A download | download the new version the same way | delete the `tmpmail` file |
+
+Your inboxes and settings stay in `~/.local/state/tmpmail` and `~/.config/tmpmail`; delete
+those folders to remove everything.
+
+Optional helpers you probably have already: `copy` uses `wl-copy`, `xclip` or `xsel` on
+Linux (`pbcopy` on macOS, `clip.exe` on Windows); `read --html` opens your browser;
+`watch --notify` uses `notify-send` on Linux; long messages open in `less`.
 
 ### Desktop app
 
-**[Download the desktop app (version 0.1.4)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.4)**,
-then pick the file for your system. (The release GitHub marks "Latest" is the command-line
-tool's, which has no `.deb`, `.rpm`, `.AppImage`, `.dmg` or `.exe`.)
+**[Download the desktop app (version 0.1.4)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.4)**
+and pick the file for your system. (The release GitHub marks "Latest" belongs to the
+command-line tool and has no desktop files.)
+
+The app isn't code-signed, so Windows and macOS warn the first time you open it; the table
+says how to get past the warning.
 
 | System | File | How to install |
 |---|---|---|
@@ -95,38 +125,45 @@ tool's, which has no `.deb`, `.rpm`, `.AppImage`, `.dmg` or `.exe`.)
 | **Other Linux** (Arch and others) | `tmpmail-desktop-VERSION-x86_64.AppImage` | `chmod +x` the file and run it. |
 
 <details>
-<summary>Why the warnings, and other details</summary>
+<summary>More install details</summary>
 
-- The app isn't signed with a paid certificate, so Windows and macOS warn once.
-  - On Windows, the installer installs for your user only (no admin prompt) and fetches
-    WebView2 if it's missing. **Smart App Control** blocks unsigned apps completely; it can
-    only be turned off as a whole.
-  - On macOS 15 and later, Control-click → Open no longer skips the warning. From a
-    terminal, `xattr -dr com.apple.quarantine /Applications/tmpmail.app` does the same as
-    **Open Anyway**.
-- The AppImage may need `libfuse2`. Without FUSE, run it with `--appimage-extract-and-run`
-  ([details](gui/README.md#without-fuse---appimage-extract-and-run)). It adds no menu entry
-  by itself; AppImageLauncher or Gear Lever add one ([or by hand](gui/README.md#the-appimage)).
-  It shows COLRv1 color emoji (Fedora's) in black and white, since the WebKit it carries
-  can't draw them ([why](gui/README.md#the-appimage)).
-- On NVIDIA, if the window stays blank, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
-- Uninstalling keeps your settings and inboxes, since the command-line tool shares them.
+- **Windows:** the installer installs for your user only (no admin prompt) and fetches
+  WebView2 if it's missing. **Smart App Control** blocks unsigned apps completely; it can
+  only be turned off as a whole.
+- **macOS 15 and later:** Control-click → Open no longer skips the warning. From a
+  terminal, `xattr -dr com.apple.quarantine /Applications/tmpmail.app` does the same as
+  **Open Anyway**.
+- **AppImage:** it may need `libfuse2`; without FUSE, run it with
+  `--appimage-extract-and-run` ([details](gui/README.md#without-fuse---appimage-extract-and-run)).
+  It adds no menu entry by itself; AppImageLauncher or Gear Lever add one
+  ([or by hand](gui/README.md#the-appimage)). It shows COLRv1 color emoji (Fedora's) in black
+  and white, since the WebKit it carries can't draw them ([why](gui/README.md#the-appimage)).
+- **NVIDIA:** if the window stays blank, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+- **Uninstalling** keeps your settings and inboxes, since the command-line tool shares them.
   [How to remove everything](gui/README.md#removing-it).
-- If you use the command-line tool too, use version 0.3.2 or later.
-- Each release has `SHA256SUMS` and build attestations
+- **With the command-line tool:** use version 0.3.2 or later of it.
+- **Check a download:** each release has `SHA256SUMS` and build attestations
   (`gh attestation verify FILE --repo qorvyx/tmpmail --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`).
-- To run it from source (Rust 1.90+, Node 24, pnpm): `cd gui && pnpm install && pnpm tauri dev`.
+- **From source** (Rust 1.90+, Node 24, pnpm): `cd gui && pnpm install && pnpm tauri dev`.
 
 </details>
 
 ## Quick start
 
+```console
+$ tmpmail new
+noblesummit274@fldubai.com
+via mail.tm (until deleted; messages kept 7 days)
+$ tmpmail otp --wait
+482913
+```
+
+Then:
+
 ```sh
-tmpmail new            # make an address
 tmpmail                # list the mail that arrived
 tmpmail read 1         # read the newest message
-tmpmail otp --wait     # wait for a mail with a code and print the code
-tmpmail tui            # or browse everything in a full-screen view
+tmpmail tui            # browse everything in a full-screen view
 ```
 
 The address you made last is the *active* one; every command uses it unless you
@@ -142,11 +179,10 @@ highlighted, and `y` copies it. Press `?` for the keys.
 Rather have a window? The desktop app does the same with the same inboxes: it shows your
 mail live, puts the code in a big banner with a Copy button, shows HTML mail safely (light
 or dark), saves attachments, notifies you of new mail, and can stay in the tray.
-[More about the app](gui/README.md).
+[More about the app](gui/README.md). To install it, see
+[Install → Desktop app](#desktop-app).
 
 ![The tmpmail desktop app showing a verification code in a banner above the mail](assets/desktop.png)
-
-To install it, see [Install → Desktop app](#desktop-app).
 
 ## Guide
 
@@ -419,6 +455,16 @@ Environment: `TMPMAIL_PROVIDER` (comma list), `TMPMAIL_TIMEOUT`, `TMPMAIL_POLL_I
 
 </details>
 
+## When not to use tmpmail
+
+- **For anything you need to keep.** An address and its mail last only as long as the
+  service keeps them (from an hour to until you delete it; see [Providers](#providers)), so
+  don't use one for an account you want to recover later.
+- **For anything private.** The services can read the mail, and Maildrop inboxes are public.
+- **To send mail.** tmpmail only receives.
+- **Where disposable addresses are blocked.** Many sites refuse known disposable domains;
+  [another domain](#choose-the-username-or-the-domain) or service sometimes gets through.
+
 ## Privacy and security
 
 - **No telemetry.** tmpmail only talks to the mail service you use.
@@ -454,6 +500,11 @@ The crate is also a library: `tmpmail = { version = "0.3", default-features = fa
 gives the providers, inbox storage, watcher and mail cleaning without the command-line
 parts. Its API isn't stable yet. The desktop app is in [`gui/`](gui/README.md), with its own
 `gui-v*` releases.
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+To report a security problem privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 

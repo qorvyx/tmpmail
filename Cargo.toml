@@ -2,7 +2,7 @@
 name = "tmpmail"
 version = "0.3.5"
 edition = "2024"
-description = "Temporary email from the terminal: multiple providers, automatic fallback, wait/OTP/JSON for automation"
+description = "Disposable email from the terminal and a desktop app: make an address, get the verification code back."
 license = "GPL-3.0-or-later"
 rust-version = "1.85"
 repository = "https://github.com/qorvyx/tmpmail"

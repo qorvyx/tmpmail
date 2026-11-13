@@ -41,6 +41,13 @@ pub fn run(app: &mut App) -> Result<()> {
         ),
         None => None,
     };
+    // `o`'s inline images are fetched on a thread of their own, so the
+    // worker goes on listing and opening meanwhile.
+    let (inline_tx, inline_rx) = channel();
+    {
+        let (global, ev_tx, log_tx) = (global.clone(), ev_tx.clone(), log_tx.clone());
+        std::thread::spawn(move || inline_worker(global, inline_rx, ev_tx, log_tx));
+    }
     // Detached: a provider call can block for many seconds, and quitting
     // must not wait for it. The process exits with the UI.
     std::thread::spawn(move || {
@@ -51,6 +58,7 @@ pub fn run(app: &mut App) -> Result<()> {
 
     let mut terminal = ratatui::try_init().map_err(anyhow::Error::from)?;
     let mut ui = Ui::new(req_tx);
+    ui.inline = Some(inline_tx);
     ui.pending_select = start;
     let result = ui.run(&mut terminal, app, &ev_rx, &log_rx);
     ratatui::restore();
@@ -101,6 +109,13 @@ enum Ev {
         address: String,
         id: String,
     },
+    /// A message to open in the browser (`o`), with its inline images'
+    /// `data:` URLs by cid, and how many cids it names (up to the limit).
+    Inline {
+        msg: Box<Message>,
+        images: HashMap<String, String>,
+        named: usize,
+    },
     Fatal(String),
 }
 
@@ -110,6 +125,35 @@ fn worker(global: Global, rx: Receiver<Req>, tx: Sender<Ev>, log: Sender<String>
     w.app.log_to_quietly(log.clone());
     w.run(&rx, &mut Front { tx, log });
     Ok(())
+}
+
+/// Fetches the inline (`cid:`) images of the messages `o` opens, as
+/// `read --html` does (same images, limits and fallbacks), with an `App`
+/// loaded for each, so it has the inboxes as they are now.
+fn inline_worker(
+    global: Global,
+    rx: Receiver<(String, Box<Message>)>,
+    tx: Sender<Ev>,
+    log: Sender<String>,
+) {
+    for (address, msg) in rx {
+        let named = msg.html.as_deref().map_or(0, |h| {
+            crate::render::cid_images(h)
+                .len()
+                .min(crate::provider::MAX_INLINE_CIDS)
+        });
+        let images = App::new(global.clone())
+            .ok()
+            .and_then(|mut app| {
+                app.log_to_quietly(log.clone());
+                let n = app.state.position(&address)?;
+                Some(app.inline_images(n, &msg))
+            })
+            .unwrap_or_default();
+        if tx.send(Ev::Inline { msg, images, named }).is_err() {
+            return;
+        }
+    }
 }
 
 /// The TUI's side of the shared worker loop.
@@ -285,6 +329,10 @@ struct Ui {
     picker: Option<ListState>,
     /// Select this inbox once the worker reports it (after `n`).
     pending_select: Option<String>,
+    /// Where `o` asks for a message's inline images ([`inline_worker`]),
+    /// and whether it is fetching some now.
+    inline: Option<Sender<(String, Box<Message>)>>,
+    inline_busy: bool,
     quit: bool,
 }
 
@@ -312,6 +360,8 @@ impl Ui {
             help_rows: 0,
             picker: None,
             pending_select: None,
+            inline: None,
+            inline_busy: false,
             quit: false,
         }
     }
@@ -338,10 +388,14 @@ impl Ui {
                 }
             }
             for ev in events.try_iter() {
-                if let Ev::Fatal(e) = ev {
-                    return Err(anyhow::anyhow!(e).into());
+                match ev {
+                    Ev::Fatal(e) => return Err(anyhow::anyhow!(e).into()),
+                    Ev::Inline { msg, images, named } => {
+                        self.inline_busy = false;
+                        self.open_html(app, &msg, &images, named);
+                    }
+                    ev => self.event(ev),
                 }
-                self.event(ev);
             }
             for msg in logs.try_iter() {
                 self.say(msg);
@@ -505,7 +559,7 @@ impl Ui {
                 self.load_preview();
                 self.say("message deleted");
             }
-            Ev::Fatal(_) => unreachable!("handled in run"),
+            Ev::Fatal(_) | Ev::Inline { .. } => unreachable!("handled in run"),
         }
     }
 
@@ -718,13 +772,24 @@ impl Ui {
                 None => {}
             },
             KeyCode::Char('o') => {
-                if let Some(msg) = self.message().cloned() {
-                    match app.open_html(&msg, false, &Default::default()) {
-                        Ok(view) => match view.note {
-                            Some(note) => self.say(format!("opened the message ({note})")),
-                            None => self.say("opened the message in the browser"),
-                        },
-                        Err(e) => self.say(format!("could not open the message: {e}")),
+                if self.inline_busy {
+                    self.say("still loading the inline images of the message being opened...");
+                } else if let Some(msg) = self.message().cloned() {
+                    // A message that may have inline images: they are
+                    // fetched off the screen thread, and it opens then.
+                    let may_have = msg.html.as_deref().is_some_and(|h| {
+                        let h = h.to_ascii_lowercase();
+                        h.contains("cid:") || h.contains("attachment:")
+                    });
+                    let address = self.shown.as_ref().map(|(a, _)| a.clone());
+                    match (&self.inline, address) {
+                        (Some(inline), Some(address)) if may_have => {
+                            if inline.send((address, Box::new(msg))).is_ok() {
+                                self.inline_busy = true;
+                                self.say("loading the message's inline images...");
+                            }
+                        }
+                        _ => self.open_html(app, &msg, &HashMap::new(), 0),
                     }
                 }
             }
@@ -742,6 +807,31 @@ impl Ui {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Opens `msg` in the browser with its inline `images` (of the `named`
+    /// cids it names), and says how.
+    fn open_html(
+        &mut self,
+        app: &App,
+        msg: &Message,
+        images: &HashMap<String, String>,
+        named: usize,
+    ) {
+        let missing = named.saturating_sub(images.len());
+        let missing = (missing > 0)
+            .then(|| format!("{missing} of its {named} inline images couldn't be loaded"));
+        match app.open_html(msg, false, images) {
+            Ok(view) => match [view.note, missing]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+            {
+                notes if notes.is_empty() => self.say("opened the message in the browser"),
+                notes => self.say(format!("opened the message ({})", notes.join("; "))),
+            },
+            Err(e) => self.say(format!("could not open the message: {e}")),
         }
     }
 
@@ -1774,6 +1864,48 @@ mod tests {
 
         press(&mut ui, &mut app, KeyCode::Char('n'));
         assert!(matches!(rx.try_recv(), Ok(Req::Create(None))));
+    }
+
+    #[test]
+    fn o_fetches_inline_images_off_the_screen_thread() {
+        // Recheck R2: `o` opened the copy without its inline images, which
+        // `read --html` shows. A thread of its own fetches them; the screen
+        // and the worker go on.
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_test(dir.path().to_path_buf());
+        let (tx, rx) = channel();
+        let (inline_tx, inline_rx) = channel();
+        let mut ui = Ui::new(tx);
+        ui.inline = Some(inline_tx);
+        let inbox = Inbox::new("mailtm", "a@x.com".into(), serde_json::Value::Null);
+        ui.event(Ev::Inboxes {
+            inboxes: vec![inbox],
+            active: Some("a@x.com".into()),
+        });
+        ui.event(Ev::Listed {
+            address: "a@x.com".into(),
+            result: Ok(vec![summary("1", "Logo")]),
+            live: true,
+        });
+        ui.event(Ev::Opened {
+            address: "a@x.com".into(),
+            id: "1".into(),
+            result: Ok(Box::new(Message {
+                id: "1".into(),
+                subject: "Logo".into(),
+                html: Some(r#"<p>Hi <img src="CID:logo@x" alt="INLINE-ALT"></p>"#.into()),
+                ..Default::default()
+            })),
+        });
+        press(&mut ui, &mut app, KeyCode::Char('o'));
+        let (address, msg) = inline_rx.try_recv().unwrap();
+        assert_eq!((address.as_str(), msg.id.as_str()), ("a@x.com", "1"));
+        assert!(ui.status.as_ref().unwrap().0.starts_with("loading"));
+        drop(rx);
+        // A second `o` meanwhile fetches nothing more.
+        press(&mut ui, &mut app, KeyCode::Char('o'));
+        assert!(inline_rx.try_recv().is_err());
+        assert!(ui.status.as_ref().unwrap().0.starts_with("still loading"));
     }
 
     #[test]

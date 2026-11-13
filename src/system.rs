@@ -541,32 +541,87 @@ pub struct View {
     pub note: Option<String>,
     /// A snap browser that never ran, so it has no folder of its own: the
     /// copy in the state folder is handed to it through the document
-    /// portal ([`open_view`]).
+    /// portal ([`open_view`]), which sets `note` once it knows how it went.
     pub never_ran: Option<String>,
 }
 
-/// Opens a view file [`write_view`] wrote in the browser. For a snap
-/// browser that never ran, the file goes through `gio launch` and the
-/// snap's desktop file: GLib hands a file to a snap app through the
-/// document portal (`/run/user/UID/doc/…`, which the snap may read), as
-/// GNOME's openers do. `gio` isn't waited for (the TUI would freeze while
-/// a portal starts), so whether the snap could read it isn't known, and
-/// `note` stays. Without `gio` or the desktop file, the copy goes to the
-/// browser as usual.
-pub fn open_view(view: &View, browser: Option<&str>) -> anyhow::Result<()> {
+/// How a copy for a snap that never ran went to it ([`open_view`]).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Handover {
+    /// `gio launch` with the snap's desktop file: through the portal.
+    Portal,
+    /// No `gio` on `PATH`.
+    NoGio,
+    /// No desktop file of the snap's to launch.
+    NoDesktopFile,
+    /// `gio` couldn't be started.
+    GioFailed,
+}
+
+/// The note for a copy handed to `snap`, which never ran, as `how` says.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn never_ran_note(snap: &str, how: Handover) -> String {
+    let start = format!(
+        "the {snap} snap has never run, so it has no folder of its own (~/snap/{snap}/common)"
+    );
+    let not_portal = |why: &str| {
+        format!(
+            "{start}, and the copy couldn't go through the document portal ({why}), so it \
+             was opened from the state folder, which {snap} may not be able to read. If \
+             {snap} refuses it, start {snap} once, then run this again"
+        )
+    };
+    match how {
+        Handover::Portal => format!(
+            "{start}; the copy was handed to it through the document portal. If {snap} \
+             refuses it, start {snap} once, then run this again"
+        ),
+        Handover::NoGio => not_portal("gio isn't installed"),
+        Handover::NoDesktopFile => not_portal("its desktop file wasn't found"),
+        Handover::GioFailed => not_portal("gio couldn't be started"),
+    }
+}
+
+/// Opens a view file [`write_view`] wrote in the browser, and returns it
+/// with its note complete. For a snap browser that never ran, the file
+/// goes through `gio launch` and the snap's desktop file: GLib hands a file
+/// to a snap app through the document portal (`/run/user/UID/doc/…`, which
+/// the snap may read), as GNOME's openers do. `gio` isn't waited for (the
+/// TUI would freeze while a portal starts), so whether the snap could read
+/// it isn't known. Without `gio` or the desktop file, the copy goes to the
+/// browser as usual. The note then says which way it went; if the browser
+/// can't be started, the error carries the note.
+pub fn open_view(
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))] mut view: View,
+    browser: Option<&str>,
+) -> anyhow::Result<View> {
     let path = view.path.to_string_lossy().into_owned();
     #[cfg(target_os = "linux")]
-    if let Some(snap) = &view.never_ran {
-        let desktop = on_path("gio")
-            .then(|| snap_desktop_file(browser_cmd(browser).as_deref(), snap, &Snapd::system()))
-            .flatten();
-        if let Some(desktop) = desktop {
-            if launch_desktop_file(&desktop, &path).is_ok() {
-                return Ok(());
+    if let Some(snap) = view.never_ran.clone() {
+        let how = if !on_path("gio") {
+            Handover::NoGio
+        } else {
+            match snap_desktop_file(browser_cmd(browser).as_deref(), &snap, &Snapd::system()) {
+                None => Handover::NoDesktopFile,
+                Some(desktop) => match launch_desktop_file(&desktop, &path) {
+                    Ok(()) => Handover::Portal,
+                    Err(_) => Handover::GioFailed,
+                },
             }
+        };
+        view.note = Some(never_ran_note(&snap, how));
+        if how == Handover::Portal {
+            return Ok(view);
         }
     }
-    open(&path, browser)
+    match open(&path, browser) {
+        Ok(()) => Ok(view),
+        Err(e) => match &view.note {
+            Some(note) => Err(e.context(note.clone())),
+            None => Err(e),
+        },
+    }
 }
 
 /// Starts `gio launch DESKTOP FILE`, and waits for it on a thread of its
@@ -625,8 +680,9 @@ pub fn write_view(
 ///
 /// A snap that never ran has no `~/snap/NAME` (or no `common` in it), and
 /// tmpmail creates nothing there for it: the copy goes to the state folder,
-/// marked to be handed over through the document portal ([`open_view`]),
-/// with a note saying to start the browser once if it is refused.
+/// marked to be handed over through the document portal ([`open_view`],
+/// which adds a note saying how it went, and to start the browser once if
+/// it is refused).
 ///
 /// The snap may write in `~/snap/NAME`, and swap any folder there for a
 /// link at any time. So that folder is reached through open folders, never
@@ -666,13 +722,9 @@ fn write_view_in(
                     });
                 }
                 Err(_) if snap_never_ran(&snaps, snap) => {
+                    // The note follows once `open_view` knows how it went.
                     never_ran = Some(snap.to_string());
-                    Some(format!(
-                        "the {snap} snap has never run, so it has no folder of its own \
-                         (~/snap/{snap}/common); the copy was handed to it through the \
-                         document portal. If {snap} refuses it, start {snap} once, then \
-                         run this again"
-                    ))
+                    None
                 }
                 Err(e) => Some(format!(
                     "{e}; the copy is in the state folder instead, which the {snap} snap may \
@@ -1474,7 +1526,7 @@ mod tests {
         // A snap that never ran (no `common` folder) too.
         let none = write_view_in(&state, Some(&home), Some("chromium"), "5.html", "y").unwrap();
         assert_eq!(none.path, state.join("view/tmpmail-5.html"));
-        assert!(none.note.is_some());
+        assert_eq!(none.never_ran.as_deref(), Some("chromium"));
     }
 
     #[test]
@@ -1500,11 +1552,7 @@ mod tests {
             .unwrap();
             assert_eq!(view.path, state.join(format!("view/tmpmail-{i}.html")));
             assert_eq!(view.never_ran.as_deref(), Some("firefox"));
-            let note = view.note.unwrap();
-            assert!(
-                note.contains("start firefox once, then run this again"),
-                "{note}"
-            );
+            assert!(view.note.is_none());
         }
         // Nothing was made for the snap.
         assert!(!home.join("snap/firefox/common").exists());
@@ -1524,6 +1572,31 @@ mod tests {
         std::os::unix::fs::symlink(dir.path().join("unmounted"), home2.join("snap")).unwrap();
         let view = write_view_in(&state, Some(&home2), Some("firefox"), "6.html", "y").unwrap();
         assert!(view.never_ran.is_none() && view.note.is_some());
+    }
+
+    #[test]
+    fn the_never_ran_note_says_which_way_the_copy_went() {
+        // Recheck R3: without gio the note still said the copy went
+        // through the document portal, but it was opened by path.
+        let portal = never_ran_note("firefox", Handover::Portal);
+        assert!(
+            portal.contains("handed to it through the document portal"),
+            "{portal}"
+        );
+        for how in [
+            Handover::NoGio,
+            Handover::NoDesktopFile,
+            Handover::GioFailed,
+        ] {
+            let note = never_ran_note("firefox", how);
+            assert!(!note.contains("handed to it"), "{note}");
+            assert!(note.contains("opened from the state folder"), "{note}");
+            assert!(
+                note.contains("start firefox once, then run this again"),
+                "{note}"
+            );
+        }
+        assert!(never_ran_note("firefox", Handover::NoGio).contains("gio isn't installed"));
     }
 
     #[test]

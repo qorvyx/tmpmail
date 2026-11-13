@@ -439,7 +439,7 @@ impl App {
     /// many names point at it, at most [`provider::MAX_INLINE_CIDS`] names
     /// are looked up, and at most [`provider::MAX_INLINE_TOTAL`] bytes of
     /// images are put in the copy.
-    fn inline_images(&mut self, n: usize, msg: &Message) -> HashMap<String, String> {
+    pub(crate) fn inline_images(&mut self, n: usize, msg: &Message) -> HashMap<String, String> {
         let mut out = HashMap::new();
         let Some(html) = &msg.html else {
             return out;
@@ -516,8 +516,7 @@ impl App {
         let name = format!("{}.html", safe_filename(&msg.id, "message"));
         let browser = self.browser();
         let view = system::write_view(self.store.dir(), browser.as_deref(), &name, &doc)?;
-        system::open_view(&view, browser.as_deref())?;
-        Ok(view)
+        Ok(system::open_view(view, browser.as_deref())?)
     }
 
     // ----- wait / otp / links -----

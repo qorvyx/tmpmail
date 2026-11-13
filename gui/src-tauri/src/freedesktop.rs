@@ -80,14 +80,19 @@ pub(crate) fn appimage_dir() -> Option<PathBuf> {
 
 /// The cache folder: `$XDG_CACHE_HOME`, else `~/.cache`.
 pub(crate) fn dirs_cache() -> Option<PathBuf> {
-    std::env::var_os("XDG_CACHE_HOME")
+    xdg_home("XDG_CACHE_HOME", ".cache")
+}
+
+/// The absolute folder `$var` names, else `fallback` in an absolute `$HOME`.
+fn xdg_home(var: &str, fallback: &str) -> Option<PathBuf> {
+    std::env::var_os(var)
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .or_else(|| {
             std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .filter(|h| h.is_absolute())
-                .map(|h| h.join(".cache"))
+                .map(|h| h.join(fallback))
         })
 }
 
@@ -149,15 +154,23 @@ pub fn request(summary: &str, body: &str) -> Request {
     }
 }
 
-/// GNOME Shell takes a notification's app icon from its desktop entry and
-/// ignores `app_icon`, so a plain AppImage (no desktop file installed: its
-/// icon is a `file://` URI, see [`icon`]) showed a generic icon there. For
-/// GNOME the logo also goes as the notification's image (`image-path`),
-/// which GNOME does show; other servers already show `app_icon`, and would
-/// show the logo twice. (Not once `tmpmail.desktop` is installed, see
-/// [`desktop_entry_installed`].)
-fn with_image_for(request: &mut Request, server: &str) {
-    if server == "gnome-shell" && request.icon.starts_with("file://") {
+/// Fits an AppImage's notification (its icon a `file://` URI, see
+/// [`icon`]) to where it shows. Once the app is installed outside the
+/// AppImage (`installed`, [`installed_outside`]: integrated by hand, or the
+/// deb or rpm installed too), the icon goes by its name, as the packages'
+/// does: KDE showed a `file://` icon as the notification's image besides
+/// the header's icon from the desktop entry, so the logo twice. Otherwise
+/// GNOME Shell, which takes the app icon from the desktop entry only and
+/// ignores `app_icon`, gets the logo as the notification's image
+/// (`image-path`) too; other servers already show `app_icon`, and would
+/// show it twice. `server` (the server's name) is asked only then.
+fn fit_for(request: &mut Request, installed: bool, server: impl FnOnce() -> String) {
+    if !request.icon.starts_with("file://") {
+        return;
+    }
+    if installed {
+        request.icon = ICON;
+    } else if server() == "gnome-shell" {
         request.hints.push(("image-path", request.icon));
     }
 }
@@ -189,29 +202,53 @@ fn server_name(connection: &Connection) -> String {
 }
 
 /// Whether `DESKTOP_ENTRY.desktop` is installed where desktops look for it
-/// (`$XDG_DATA_HOME`, `$XDG_DATA_DIRS`): an AppImage integrated by hand
-/// as the README says. GNOME then shows the logo from it, and an image
-/// too would show it twice.
-fn desktop_entry_installed() -> bool {
-    let home = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
+/// (`$XDG_DATA_HOME`, `$XDG_DATA_DIRS`), and [`ICON`] in the hicolor theme
+/// there, outside the AppImage this runs from: its `AppRun` puts the
+/// AppImage's own `usr/share`, which has both, first on `XDG_DATA_DIRS`,
+/// though no desktop sees them there. (A desktop file without the icon
+/// would turn a logo that shows into a name that leads nowhere.)
+fn installed_outside() -> bool {
     let dirs = std::env::var("XDG_DATA_DIRS")
         .ok()
         .filter(|d| !d.is_empty())
         .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
-    home.into_iter()
+    installed_in(
+        xdg_home("XDG_DATA_HOME", ".local/share"),
+        &dirs,
+        appimage_dir().as_deref(),
+    )
+}
+
+/// [`installed_outside`] with the data home `home`, the data dirs `dirs`
+/// and the AppImage's mount `appdir`.
+fn installed_in(home: Option<PathBuf>, dirs: &str, appdir: Option<&Path>) -> bool {
+    let data: Vec<PathBuf> = home
+        .into_iter()
         .chain(
             dirs.split(':')
                 .map(PathBuf::from)
                 .filter(|p| p.is_absolute()),
         )
-        .any(|d| {
-            d.join("applications")
-                .join(format!("{DESKTOP_ENTRY}.desktop"))
-                .is_file()
+        .filter(|d| !appdir.is_some_and(|a| d.starts_with(a)))
+        .collect();
+    let entry = data.iter().any(|d| {
+        d.join("applications")
+            .join(format!("{DESKTOP_ENTRY}.desktop"))
+            .is_file()
+    });
+    let icon = || {
+        data.iter().any(|d| {
+            std::fs::read_dir(d.join("icons/hicolor")).is_ok_and(|sizes| {
+                sizes.flatten().any(|size| {
+                    let apps = size.path().join("apps");
+                    ["png", "svg"]
+                        .iter()
+                        .any(|ext| apps.join(format!("{ICON}.{ext}")).is_file())
+                })
+            })
         })
+    };
+    entry && icon()
 }
 
 /// A shown notification.
@@ -281,8 +318,10 @@ impl Notifier {
     fn send(self: &Arc<Self>, request: &Request, target: Option<Target>) -> zbus::Result<()> {
         let connection = self.connection()?;
         let mut request = request.clone();
-        if request.icon.starts_with("file://") && !desktop_entry_installed() {
-            with_image_for(&mut request, &server_name(&connection));
+        if request.icon.starts_with("file://") {
+            fit_for(&mut request, installed_outside(), || {
+                server_name(&connection)
+            });
         }
         let request = &request;
         let hints: HashMap<&str, Value<'_>> = request
@@ -581,7 +620,8 @@ mod tests {
         let mut r = request("Code 482913 from GitHub", "Sign in");
         r.icon = "file:///home/u/.cache/tmpmail/tmpmail-gui.png";
         let mut gnome = r.clone();
-        with_image_for(&mut gnome, "gnome-shell");
+        fit_for(&mut gnome, false, || "gnome-shell".into());
+        assert_eq!(gnome.icon, r.icon);
         assert_eq!(
             gnome.hints,
             vec![
@@ -592,13 +632,64 @@ mod tests {
                 )
             ]
         );
-        // Not elsewhere, and not for an installed app (icon by name).
+        // Not elsewhere, and not for an icon given by name (not an AppImage).
         let mut kde = r.clone();
-        with_image_for(&mut kde, "Plasma");
-        assert_eq!(kde.hints, vec![("desktop-entry", "tmpmail")]);
-        let mut installed = request("x", "y");
-        with_image_for(&mut installed, "gnome-shell");
-        assert_eq!(installed.hints, vec![("desktop-entry", "tmpmail")]);
+        fit_for(&mut kde, false, || "Plasma".into());
+        assert_eq!(kde, r);
+        let mut by_name = request("x", "y");
+        fit_for(&mut by_name, false, || "gnome-shell".into());
+        assert_eq!(by_name.hints, vec![("desktop-entry", "tmpmail")]);
+    }
+
+    #[test]
+    fn an_integrated_appimage_names_its_icon_like_the_packages() {
+        // Recheck R4: KDE showed the logo twice for an integrated AppImage,
+        // the header's from the entry and the `file://` icon as the image.
+        let mut r = request("Code 482913 from GitHub", "Sign in");
+        r.icon = "file:///home/u/.cache/tmpmail/tmpmail-gui.png";
+        for server in ["Plasma", "gnome-shell"] {
+            let mut fitted = r.clone();
+            fit_for(&mut fitted, true, || server.into());
+            assert_eq!(fitted.icon, "tmpmail-gui");
+            assert_eq!(fitted.hints, vec![("desktop-entry", "tmpmail")]);
+        }
+    }
+
+    #[test]
+    fn the_appimages_own_desktop_file_isnt_an_installed_one() {
+        // Recheck R5: AppRun puts the mount's `usr/share` (which has
+        // `tmpmail.desktop` and the icon) first on XDG_DATA_DIRS, so GNOME
+        // never got the logo from a plain AppImage.
+        let dir = tempfile::tempdir().unwrap();
+        let entry = |d: &Path| {
+            std::fs::create_dir_all(d.join("applications")).unwrap();
+            std::fs::write(d.join("applications/tmpmail.desktop"), "").unwrap();
+        };
+        let icon = |d: &Path| {
+            std::fs::create_dir_all(d.join("icons/hicolor/128x128/apps")).unwrap();
+            std::fs::write(d.join("icons/hicolor/128x128/apps/tmpmail-gui.png"), "").unwrap();
+        };
+        let mount = dir.path().join(".mount_tmpmaiAbC");
+        entry(&mount.join("usr/share"));
+        icon(&mount.join("usr/share"));
+        let (home, system) = (dir.path().join("home"), dir.path().join("usr/share"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&system).unwrap();
+        // As AppRun sets it (with its doubled and trailing slashes).
+        let dirs = format!("{}//usr/share/:{}", mount.display(), system.display());
+        assert!(!installed_in(Some(home.clone()), &dirs, Some(&mount)));
+        // Not an AppImage: the same folder counts.
+        assert!(installed_in(Some(home.clone()), &dirs, None));
+        // Integrated by hand: the desktop file alone isn't enough.
+        entry(&home);
+        assert!(!installed_in(Some(home.clone()), &dirs, Some(&mount)));
+        icon(&home);
+        assert!(installed_in(Some(home.clone()), &dirs, Some(&mount)));
+        // A package installed too.
+        std::fs::remove_dir_all(&home).unwrap();
+        entry(&system);
+        icon(&system);
+        assert!(installed_in(Some(home), &dirs, Some(&mount)));
     }
 
     #[test]

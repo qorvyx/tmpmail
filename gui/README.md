@@ -211,6 +211,11 @@ its desktop file, so without one:
   notification's `app_icon` show it. GNOME Shell takes the app icon from the installed desktop entry
   only, so there the header keeps a generic icon until the AppImage is integrated (below);
   until then the app also hands GNOME the logo as the notification's image (`image-path`).
+  The desktop file inside the AppImage doesn't count: no desktop sees it, though the
+  AppImage's start script puts its folder on `XDG_DATA_DIRS`. Once a `tmpmail.desktop` and
+  the `tmpmail-gui` icon are installed (the AppImage integrated by hand as below, or the deb
+  or rpm installed too), the notifications name the icon `tmpmail-gui`, as the packages' do, and show the logo
+  once (KDE showed a file's logo as the notification's image besides the header's).
 - **Color emoji (COLRv1 fonts):** the WebKitGTK the AppImage carries was built against an
   older FreeType than most systems now have (it uses the system's), and FreeType 2.13
   changed how COLRv1 color glyphs are handed over: its web process dies on the first such

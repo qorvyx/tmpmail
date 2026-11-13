@@ -52,9 +52,12 @@ what breaks:
 - **AppImage: notifications show the logo.** Without an installed desktop file they showed
   a generic icon; they now name the logo by a file in the cache folder, which servers that
   go by `app_icon` show. GNOME takes the header's icon from an installed desktop entry only,
-  so there the app hands it the logo as the notification's image instead, and the header
-  shows the logo once the AppImage is integrated. The window's icon on Wayland also needs
-  the AppImage integrated (AppImageLauncher, Gear Lever, or by hand): the README says how.
+  so there the app hands it the logo as the notification's image instead (the desktop file
+  inside the AppImage itself no longer counts as installed, which kept GNOME from getting
+  it), and the header shows the logo once the AppImage is integrated. An integrated
+  AppImage names its icon as the packages do, so KDE shows the logo once, not twice.
+  The window's icon on Wayland also needs the AppImage integrated (AppImageLauncher, Gear
+  Lever, or by hand): the README says how.
 - **AppImage: color emoji no longer blank the window.** The WebKitGTK the AppImage
   carries crashed on COLRv1 color emoji (Fedora's emoji font): an emoji in a subject
   turned the window blank, on every start while that mail was listed. The AppImage now

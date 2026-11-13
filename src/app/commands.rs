@@ -512,7 +512,7 @@ impl App {
         let name = format!("{}.html", safe_filename(&msg.id, "message"));
         let browser = self.browser();
         let view = system::write_view(self.store.dir(), browser.as_deref(), &name, &doc)?;
-        system::open(&view.path.to_string_lossy(), browser.as_deref())?;
+        system::open_view(&view, browser.as_deref())?;
         Ok(view)
     }
 

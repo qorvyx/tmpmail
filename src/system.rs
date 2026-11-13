@@ -539,6 +539,52 @@ fn is_state_view(name: &str) -> bool {
 pub struct View {
     pub path: PathBuf,
     pub note: Option<String>,
+    /// A snap browser that never ran, so it has no folder of its own: the
+    /// copy in the state folder is handed to it through the document
+    /// portal ([`open_view`]).
+    pub never_ran: Option<String>,
+}
+
+/// Opens a view file [`write_view`] wrote in the browser. For a snap
+/// browser that never ran, the file goes through `gio launch` and the
+/// snap's desktop file: GLib hands a file to a snap app through the
+/// document portal (`/run/user/UID/doc/…`, which the snap may read), as
+/// GNOME's openers do. `gio` isn't waited for (the TUI would freeze while
+/// a portal starts), so whether the snap could read it isn't known, and
+/// `note` stays. Without `gio` or the desktop file, the copy goes to the
+/// browser as usual.
+pub fn open_view(view: &View, browser: Option<&str>) -> anyhow::Result<()> {
+    let path = view.path.to_string_lossy().into_owned();
+    #[cfg(target_os = "linux")]
+    if let Some(snap) = &view.never_ran {
+        let desktop = on_path("gio")
+            .then(|| snap_desktop_file(browser_cmd(browser).as_deref(), snap, &Snapd::system()))
+            .flatten();
+        if let Some(desktop) = desktop {
+            if launch_desktop_file(&desktop, &path).is_ok() {
+                return Ok(());
+            }
+        }
+    }
+    open(&path, browser)
+}
+
+/// Starts `gio launch DESKTOP FILE`, and waits for it on a thread of its
+/// own, so it leaves no zombie behind.
+#[cfg(target_os = "linux")]
+fn launch_desktop_file(desktop: &Path, file: &str) -> anyhow::Result<()> {
+    let mut child = spawn(
+        Command::new("gio")
+            .arg("launch")
+            .arg(desktop)
+            .arg(file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+    .context("cannot run gio")?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
 }
 
 /// Writes a viewer file for `browser` (as [`open`] runs it), readable only
@@ -577,6 +623,11 @@ pub fn write_view(
 /// (GNOME hands a file to a snap through the document portal, so the state
 /// folder worked there; KDE doesn't.)
 ///
+/// A snap that never ran has no `~/snap/NAME` (or no `common` in it), and
+/// tmpmail creates nothing there for it: the copy goes to the state folder,
+/// marked to be handed over through the document portal ([`open_view`]),
+/// with a note saying to start the browser once if it is refused.
+///
 /// The snap may write in `~/snap/NAME`, and swap any folder there for a
 /// link at any time. So that folder is reached through open folders, never
 /// by path: `~/snap` is opened (it may be the user's own link: no snap can
@@ -593,6 +644,8 @@ fn write_view_in(
     contents: &str,
 ) -> crate::error::Result<View> {
     let name = format!("{VIEW_PREFIX}{name}");
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut never_ran = None;
     #[cfg(target_os = "linux")]
     let note = match (home, snap) {
         (Some(home), Some(snap)) => {
@@ -606,7 +659,20 @@ fn write_view_in(
                 Ok(path) => {
                     prune_state_views(state);
                     prune_other_snaps(&snaps, Some(snap));
-                    return Ok(View { path, note: None });
+                    return Ok(View {
+                        path,
+                        note: None,
+                        never_ran: None,
+                    });
+                }
+                Err(_) if snap_never_ran(&snaps, snap) => {
+                    never_ran = Some(snap.to_string());
+                    Some(format!(
+                        "the {snap} snap has never run, so it has no folder of its own \
+                         (~/snap/{snap}/common); the copy was handed to it through the \
+                         document portal. If {snap} refuses it, start {snap} once, then \
+                         run this again"
+                    ))
                 }
                 Err(e) => Some(format!(
                     "{e}; the copy is in the state folder instead, which the {snap} snap may \
@@ -632,7 +698,11 @@ fn write_view_in(
         ViewDir::open(state, &["view"]).map_err(|e| anyhow!("open {}: {e}", views.display()))?;
     let path = dir.write(&name, contents).map_err(|e| anyhow!("{}", e))?;
     dir.prune(VIEW_MAX_AGE, is_state_view);
-    Ok(View { path, note })
+    Ok(View {
+        path,
+        note,
+        never_ran,
+    })
 }
 
 /// Prunes the state folder's view files, if it has any.
@@ -936,13 +1006,7 @@ fn snap_browser(cmd: Option<&str>, snapd: &Snapd) -> Option<String> {
     if !OPENERS.contains(&base) {
         return snap_of_program(&prog, snapd);
     }
-    let out = Command::new("xdg-mime")
-        .args(["query", "default", "text/html"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    snap_of_desktop_id(String::from_utf8_lossy(&out.stdout).trim(), snapd)
+    snap_of_desktop_id(&default_html_app()?, snapd)
 }
 
 /// A snap's name from one of its commands' names (`firefox`, or
@@ -1022,6 +1086,67 @@ fn snap_of_program(prog: &str, snapd: &Snapd) -> Option<String> {
 fn executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+/// Whether snap `snap` never ran: `snaps` (`~/snap`) is missing, or
+/// `NAME` or `NAME/common` in it, none of them a link. (A link, or a
+/// `~/snap` link that leads nowhere, isn't a snap that never ran.)
+#[cfg(target_os = "linux")]
+fn snap_never_ran(snaps: &Path, snap: &str) -> bool {
+    let missing = |p: &Path| {
+        std::fs::symlink_metadata(p).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+    };
+    if missing(snaps) {
+        return true;
+    }
+    if !snaps.is_dir() {
+        return false;
+    }
+    let own = snaps.join(snap);
+    if missing(&own) {
+        return true;
+    }
+    let is_dir = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+    is_dir(&own) && missing(&own.join("common"))
+}
+
+/// The desktop file `gio launch` hands a view file to for snap `snap`
+/// when `cmd` (as [`browser_cmd`] gives it) opens it: for `xdg-open` and
+/// the other openers the desktop's default for HTML files, if it is that
+/// snap's; else the snap's main app, `SNAP_SNAP.desktop`
+/// (`firefox_firefox.desktop`). Never another app of the snap.
+#[cfg(target_os = "linux")]
+fn snap_desktop_file(cmd: Option<&str>, snap: &str, snapd: &Snapd) -> Option<PathBuf> {
+    let opener = cmd
+        .and_then(|c| split_cmd(c).ok())
+        .and_then(|(prog, _)| Some(OPENERS.contains(&Path::new(&prog).file_name()?.to_str()?)))
+        .unwrap_or(false);
+    let default = opener.then(default_html_app).flatten();
+    snap_desktop_in(default.as_deref(), snap, snapd)
+}
+
+/// [`snap_desktop_file`] with the default HTML app's desktop id `default`.
+#[cfg(target_os = "linux")]
+fn snap_desktop_in(default: Option<&str>, snap: &str, snapd: &Snapd) -> Option<PathBuf> {
+    let id = default
+        .filter(|id| snap_of_desktop_id(id, snapd).as_deref() == Some(snap))
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{snap}_{snap}.desktop"));
+    let path = snapd.desktop.join(id);
+    path.is_file().then_some(path)
+}
+
+/// The desktop's default app for HTML files (`xdg-mime query default
+/// text/html`, what `xdg-open` goes by).
+#[cfg(target_os = "linux")]
+fn default_html_app() -> Option<String> {
+    let out = Command::new("xdg-mime")
+        .args(["query", "default", "text/html"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
 }
 
 /// The snap a desktop file belongs to: snapd names them `SNAP_APP.desktop`
@@ -1350,6 +1475,87 @@ mod tests {
         let none = write_view_in(&state, Some(&home), Some("chromium"), "5.html", "y").unwrap();
         assert_eq!(none.path, state.join("view/tmpmail-5.html"));
         assert!(none.note.is_some());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_snap_that_never_ran_gets_the_copy_through_the_portal() {
+        // Retest F2: on a fresh Kubuntu session (no `~/snap` yet) the copy
+        // went to the state folder, which the Firefox snap refused.
+        let dir = tempfile::tempdir().unwrap();
+        let (state, home) = (dir.path().join("state"), dir.path().join("home"));
+        std::fs::create_dir(&home).unwrap();
+        // No `~/snap`, then no `~/snap/firefox`, then no `common`.
+        for (i, made) in ["", "snap", "snap/firefox"].into_iter().enumerate() {
+            if !made.is_empty() {
+                std::fs::create_dir(home.join(made)).unwrap();
+            }
+            let view = write_view_in(
+                &state,
+                Some(&home),
+                Some("firefox"),
+                &format!("{i}.html"),
+                "y",
+            )
+            .unwrap();
+            assert_eq!(view.path, state.join(format!("view/tmpmail-{i}.html")));
+            assert_eq!(view.never_ran.as_deref(), Some("firefox"));
+            let note = view.note.unwrap();
+            assert!(
+                note.contains("start firefox once, then run this again"),
+                "{note}"
+            );
+        }
+        // Nothing was made for the snap.
+        assert!(!home.join("snap/firefox/common").exists());
+        // Once it ran, its folder is used.
+        std::fs::create_dir(home.join("snap/firefox/common")).unwrap();
+        let view = write_view_in(&state, Some(&home), Some("firefox"), "4.html", "y").unwrap();
+        assert!(view.never_ran.is_none() && view.note.is_none());
+        // A link isn't a snap that never ran, nor is a `~/snap` link that
+        // leads nowhere: the usual note.
+        std::fs::create_dir_all(home.join("snap/evil")).unwrap();
+        std::os::unix::fs::symlink(&state, home.join("snap/evil/common")).unwrap();
+        let view = write_view_in(&state, Some(&home), Some("evil"), "5.html", "y").unwrap();
+        assert!(view.never_ran.is_none());
+        assert!(view.note.unwrap().contains("symbolic link"));
+        let home2 = dir.path().join("home2");
+        std::fs::create_dir(&home2).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("unmounted"), home2.join("snap")).unwrap();
+        let view = write_view_in(&state, Some(&home2), Some("firefox"), "6.html", "y").unwrap();
+        assert!(view.never_ran.is_none() && view.note.is_some());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn the_portal_launch_uses_the_snaps_own_browser_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapd = fake_snapd(dir.path());
+        let find = |default, snap| snap_desktop_in(default, snap, &snapd);
+        assert_eq!(find(None, "firefox"), None);
+        // Another app of the snap is never picked.
+        std::fs::write(snapd.desktop.join("firefox_geckodriver.desktop"), "").unwrap();
+        assert_eq!(find(None, "firefox"), None);
+        std::fs::write(snapd.desktop.join("firefox_firefox.desktop"), "").unwrap();
+        std::fs::write(snapd.desktop.join("chromium_chromium-beta.desktop"), "").unwrap();
+        assert_eq!(
+            find(None, "firefox"),
+            Some(snapd.desktop.join("firefox_firefox.desktop"))
+        );
+        // The desktop's default, when it is that snap's.
+        assert_eq!(
+            find(Some("chromium_chromium-beta.desktop"), "chromium"),
+            Some(snapd.desktop.join("chromium_chromium-beta.desktop"))
+        );
+        assert_eq!(
+            find(Some("chromium_chromium-beta.desktop"), "firefox"),
+            Some(snapd.desktop.join("firefox_firefox.desktop"))
+        );
+        // A browser named directly (`--browser /snap/bin/firefox`).
+        assert_eq!(
+            snap_desktop_file(Some("/snap/bin/firefox"), "firefox", &snapd),
+            Some(snapd.desktop.join("firefox_firefox.desktop"))
+        );
     }
 
     #[test]

@@ -1825,17 +1825,18 @@ mod tests {
     fn the_depth_of_a_body_is_measured_once() {
         // Review of the security round: each body was parsed several times
         // over to measure it (its text, its document in each theme).
+        // Compared with the first, parsing call rather than a fixed time, so
+        // a slow or busy machine doesn't fail it.
         let html = "<div>x</div>".repeat(200_000);
-        assert!(!html_too_large(&html));
         let t = std::time::Instant::now();
-        for _ in 0..20 {
+        assert!(!html_too_large(&html));
+        let parse = t.elapsed();
+        let t = std::time::Instant::now();
+        for _ in 0..5 {
             assert!(!html_too_large(&html));
         }
-        assert!(
-            t.elapsed() < std::time::Duration::from_millis(500),
-            "{:?}",
-            t.elapsed()
-        );
+        let cached = t.elapsed() / 5;
+        assert!(cached * 4 < parse, "parse {parse:?}, cached {cached:?}");
         let deep = "<div>".repeat(2000);
         assert!(html_too_large(&deep) && html_too_large(&deep));
     }

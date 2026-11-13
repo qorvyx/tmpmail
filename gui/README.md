@@ -457,7 +457,10 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    and a `frame-ancestors` of the app's page only, so a document loaded anywhere else
    (on its own, or framed by another page) is sandboxed just the same.
    The theme and view options are in the frame's URL; no script ever touches the frame.
-4. Links get `target="_blank"`; the app denies every new window and opens only http, https
+4. Links get `target="_blank"`, except in-page ones (`href="#section"`), which move within
+   the mail's own document (the frame's fragment, never another address); the mail's `id`s
+   and `<a name>`s stay for them, prefixed with `mail-` so none is the page's own. The app
+   denies every new window and opens only http, https
    and mailto links in the system browser, from Rust. A `mailto:` link is rebuilt from its
    address, `to`, `subject` and `body` only (`attach=` and the rest go: some mail clients
    prefilled a file from the disk), and one whose address hides parameters (`%3F`) isn't

@@ -11,6 +11,10 @@ what breaks:
 
 ## What's new in 0.1.4
 
+- **In-page links work in the message.** A mail's links to its own sections (`#section`, a
+  table of contents) went nowhere: the sanitizer dropped the `id` and `name` they point at,
+  and the frame opened every link as a popup. Those are kept now, prefixed so a mail can't
+  reuse one of the page's own, and an in-page link moves within the mail.
 - **The message list can't be turned around by a sender.** A sender name or subject with a
   right-to-left override (U+202E) reversed the rest of its row in the list and in the "New
   mail" notice, so a row could read as another address, and terminal escapes showed as box

@@ -617,35 +617,74 @@ fn sanitize(
     let budget = std::sync::Mutex::new(crate::provider::MAX_INLINE_TOTAL / 3 * 4 + 4096);
     let mut builder = ammonia::Builder::default();
     builder
-        .add_generic_attributes(["style", "align", "bgcolor", "width", "height"])
+        .add_generic_attributes(["style", "align", "bgcolor", "width", "height", "id"])
+        .add_tag_attributes("a", ["name"])
         .add_tag_attributes("td", ["valign", "colspan", "rowspan"])
         .add_tag_attributes("table", ["cellpadding", "cellspacing", "border"])
         .link_rel(Some("noopener noreferrer nofollow"))
+        // In-page links (`#section`) need their targets: a mail's `id`s
+        // and `<a name>`s stay, prefixed so none is one of the page's own,
+        // and its `#` links point at the prefixed names (below).
+        .id_prefix(Some(ID_PREFIX))
         // Mail has no base address, so a relative link or image means
         // nothing, and `//host` or `\\host\share` would resolve against the
         // page: `file://host` (an SMB connection on Windows) for the CLI's
-        // copy, the app's own scheme in its frame.
-        // In the CLI's copy, in-page links (`#section`) stay; the app's
-        // frame opens every link as a popup, so there they go too.
-        .url_relative(if frame.is_some() {
-            ammonia::UrlRelative::Deny
-        } else {
-            ammonia::UrlRelative::Custom(Box::new(InPageOnly))
-        })
+        // copy, the app's own scheme in its frame. Only in-page links
+        // (`#section`) stay.
+        .url_relative(ammonia::UrlRelative::Custom(Box::new(InPageOnly)))
         .url_schemes(HashSet::from(["http", "https", "mailto", "cid", "data"]));
     if frame.is_some() {
         // Image-map areas are links too; without a target they would
-        // navigate the frame itself.
+        // navigate the frame itself. (In-page links lose theirs below.)
         builder
             .set_tag_attribute_value("a", "target", "_blank")
             .set_tag_attribute_value("area", "target", "_blank");
     }
     let cid_base = frame.map(|f| f.cid_base.to_string());
+    // Whether the link whose attributes are being filtered is an in-page
+    // one. Ammonia filters an element's attributes in order, and adds the
+    // `target` above after the mail's own ones (the mail's `target` isn't
+    // allowed, so it is gone by then): a link's `href` always comes before
+    // its `target`, which ends the link.
+    let in_page = std::sync::atomic::AtomicBool::new(false);
+    // A `#top` link means the mail's own `top` if it names one (then
+    // prefixed like the rest), else the top of the page, which the
+    // browser finds by itself for any case of `top`.
+    let names_top = names_top(html);
     builder.attribute_filter(move |element, attribute, value| {
+        use std::sync::atomic::Ordering::Relaxed;
         // A quote's source: no reader follows it, and ammonia doesn't check
         // it as a URL.
         if attribute == "cite" {
             return None;
+        }
+        let link = matches!(element, "a" | "area");
+        if link && attribute == "href" {
+            in_page.store(value.starts_with('#'), Relaxed);
+        }
+        if link && attribute == "target" {
+            // An in-page link in the app's frame moves within the mail
+            // instead of opening a popup (the app opens web links only).
+            return (!in_page.swap(false, Relaxed)).then_some(Cow::Borrowed(value));
+        }
+        if attribute == "name" {
+            return Some(Cow::Owned(with_id_prefix(value)));
+        }
+        if let Some(fragment) = value
+            .strip_prefix('#')
+            .filter(|_| is_url_attribute(attribute))
+        {
+            // In the frame, only a link may be an in-page address (an
+            // image would load the document itself).
+            if cid_base.is_some() && !(link && attribute == "href") {
+                return None;
+            }
+            let to_page_top =
+                fragment.eq_ignore_ascii_case("top") && !(fragment == "top" && names_top);
+            if fragment.is_empty() || to_page_top {
+                return Some(Cow::Borrowed(value));
+            }
+            return Some(Cow::Owned(format!("#{}", with_id_prefix(fragment))));
         }
         // `data:` only as an image's own raster picture, never as a link (a
         // page or script of the sender's) or an SVG.
@@ -932,6 +971,30 @@ fn css_unescape(s: &str) -> Cow<'_, str> {
 
 /// Keeps a relative URL only if it is an in-page link (`#section`).
 struct InPageOnly;
+
+/// What a mail's `id`s and `<a name>`s start with in a sanitized copy, so
+/// none can be (or clobber) one of the page's own.
+const ID_PREFIX: &str = "mail-";
+
+/// Whether the mail has an element with `id="top"` or `name="top"` (by its
+/// text, quoted or not), which a `#top` link then means.
+fn names_top(html: &str) -> bool {
+    static TOP: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#"(?:\s|^)(?i:id|name)\s*=\s*(?:"top"|'top'|top(?:[\s/>]|$))"#)
+            .expect("valid regex")
+    });
+    TOP.is_match(html)
+}
+
+/// `name` with [`ID_PREFIX`], as ammonia's `id_prefix` gives an `id`: kept
+/// as it is if it starts with it already.
+fn with_id_prefix(name: &str) -> String {
+    if name.starts_with(ID_PREFIX) {
+        name.to_string()
+    } else {
+        format!("{ID_PREFIX}{name}")
+    }
+}
 
 impl<'a> ammonia::UrlRelativeEvaluate<'a> for InPageOnly {
     fn evaluate<'url>(&self, url: &'url str) -> Option<Cow<'url, str>> {
@@ -1582,6 +1645,92 @@ mod tests {
             Some(&frame),
         );
         assert!(cjk.contains(r#"style="color:#333;padding:20px""#), "{cjk}");
+    }
+
+    #[test]
+    fn in_page_links_find_their_prefixed_targets() {
+        // Retest F5: `id` and `name` were dropped, so only `#top` worked.
+        let html = r##"<a href="#sec">to sec</a> <a href="#n2">to n2</a> <a href="#top">top</a>
+            <a href="#">here</a> <a href="#mail-x">x</a>
+            <h2 id="sec">Section</h2><a name="n2">named</a><p id="mail-x">x</p>
+            <form id="location"><img name="cookie" id="body"></form>
+            <img src="#sec" alt="self"><a href="https://e.x/v">web</a>"##;
+        let page = sanitize_mail_html(html, false, None);
+        for want in [
+            r##"<a href="#mail-sec" rel="noopener noreferrer nofollow">to sec</a>"##,
+            r##"<a href="#mail-n2" rel="noopener noreferrer nofollow">to n2</a>"##,
+            r##"<a href="#top" rel="noopener noreferrer nofollow">top</a>"##,
+            r##"<a href="#" rel="noopener noreferrer nofollow">here</a>"##,
+            r##"<a href="#mail-x" rel="noopener noreferrer nofollow">x</a>"##,
+            r#"<h2 id="mail-sec">"#,
+            r#"<a name="mail-n2" rel="noopener noreferrer nofollow">named</a>"#,
+            r#"<p id="mail-x">"#,
+            // No name of the page's own (DOM clobbering of `location`,
+            // `body`); `name` only on links.
+            r#"<img id="mail-body">"#,
+        ] {
+            assert!(page.contains(want), "{want} in {page}");
+        }
+        assert!(
+            !page.contains("cookie") && !page.contains(r#"id="location""#),
+            "{page}"
+        );
+        // `#top` is the mail's own `top` when it names one; `#TOP` with
+        // none is the page's top; a quote's source never stays.
+        let own = sanitize_mail_html(
+            r##"<a href="#top">up</a><div id="top">t</div><a href="#TOP">UP</a><blockquote cite="#x">q</blockquote>"##,
+            false,
+            None,
+        );
+        assert!(own.contains(r##"href="#mail-top""##), "{own}");
+        assert!(own.contains(r##"href="#TOP""##), "{own}");
+        assert!(!own.contains("cite"), "{own}");
+        assert!(names_top("<a name=top>") && names_top("<p ID = 'top'>"));
+        assert!(!names_top("<p id=\"topic\">") && !names_top("<p data-id=\"top\">"));
+
+        // The app's frame: in-page links move within the mail (no popup),
+        // web links still open as popups, and nothing else may be `#`.
+        let frame = Frame {
+            cid_base: "http://mail.localhost/mail/1/cid/",
+        };
+        let framed = sanitize_mail_html(html, false, Some(&frame));
+        assert!(
+            framed
+                .contains(r##"<a href="#mail-sec" rel="noopener noreferrer nofollow">to sec</a>"##),
+            "{framed}"
+        );
+        assert!(
+            framed.contains(r##"<a href="#top" rel="noopener noreferrer nofollow">top</a>"##),
+            "{framed}"
+        );
+        assert!(
+            framed.contains(r#"<a href="https://e.x/v" target="_blank" rel="noopener noreferrer nofollow">web</a>"#),
+            "{framed}"
+        );
+        assert!(
+            framed.contains(
+                r#"<a name="mail-n2" target="_blank" rel="noopener noreferrer nofollow">named</a>"#
+            ),
+            "{framed}"
+        );
+        assert!(framed.contains(r#"<img alt="self">"#), "{framed}");
+        // A target can't be lost by a link that isn't in-page, whatever
+        // came before it.
+        let mixed = sanitize_mail_html(
+            r##"<a href="#a">a</a><a>b</a><a href="https://e.x/">c</a><area href="#a"><a target="_self" href="https://e.x/2">d</a>"##,
+            false,
+            Some(&frame),
+        );
+        // (b, c, d, and the area, whose `href` ammonia doesn't keep.)
+        assert_eq!(mixed.matches(r#"target="_blank""#).count(), 4, "{mixed}");
+        assert!(
+            mixed.contains(r#"<a target="_blank" rel="noopener noreferrer nofollow">b</a>"#),
+            "{mixed}"
+        );
+        assert!(
+            mixed.contains(r#"href="https://e.x/2" target="_blank""#),
+            "{mixed}"
+        );
     }
 
     #[test]

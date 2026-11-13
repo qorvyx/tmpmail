@@ -31,6 +31,9 @@ pub struct Poller {
     /// Inboxes a stream announced mail for since they were last listed.
     woken: HashSet<String>,
     streams: HashMap<String, Stream>,
+    /// Inboxes whose provider rate-limited them, and until when they are
+    /// left alone, push wake-ups included.
+    held: HashMap<String, Instant>,
     tx: Sender<Signal>,
     rx: Receiver<Signal>,
     next_id: u64,
@@ -73,6 +76,7 @@ impl Poller {
             due: HashMap::new(),
             woken: HashSet::new(),
             streams: HashMap::new(),
+            held: HashMap::new(),
             tx,
             rx,
             next_id: 0,
@@ -81,7 +85,43 @@ impl Poller {
 
     /// Whether `address` should be listed now.
     pub fn is_due(&self, address: &str) -> bool {
-        self.woken.contains(address) || self.due.get(address).is_none_or(|t| Instant::now() >= *t)
+        let now = Instant::now();
+        if self.held.get(address).is_some_and(|t| now < *t) {
+            return false;
+        }
+        self.woken.contains(address) || self.due.get(address).is_none_or(|t| now >= *t)
+    }
+
+    /// [`Poller::polled`] for a listing's result: a rate limit also holds
+    /// the inbox back for [`rate_limit_pause`] (`tries` refusals in a row
+    /// before this one), push wake-ups included.
+    pub fn polled_result<T>(
+        &mut self,
+        address: &str,
+        result: &crate::error::Result<T>,
+        tries: u32,
+    ) {
+        self.polled(address, result.is_ok());
+        match result {
+            Err(e) => {
+                if let Some(pause) = rate_limit_pause(e, tries, self.interval) {
+                    self.hold(address, pause);
+                }
+            }
+            Ok(_) => {
+                self.held.remove(address);
+            }
+        }
+    }
+
+    /// Lists `address` no sooner than `wait` from now, push wake-ups
+    /// included (its provider asked to be left alone for a while).
+    pub fn hold(&mut self, address: &str, wait: Duration) {
+        let at = Instant::now() + wait;
+        let held = self.held.entry(address.to_string()).or_insert(at);
+        *held = (*held).max(at);
+        let due = self.due.entry(address.to_string()).or_insert(at);
+        *due = (*due).max(at);
     }
 
     /// Records that `address` was just listed (or failed to be) and when to
@@ -194,6 +234,7 @@ impl Poller {
     /// Stops following `address` (it was dropped or rotated away).
     pub fn forget(&mut self, address: &str) {
         self.due.remove(address);
+        self.held.remove(address);
         self.woken.remove(address);
         if let Some(s) = self.streams.remove(address) {
             // The thread notices at its next event and exits.
@@ -214,7 +255,12 @@ impl Poller {
         if let Some(d) = deadline {
             until = until.min(d);
         }
-        if !self.woken.is_empty() {
+        // A wake-up for an inbox that is held back waits for the hold.
+        if self
+            .woken
+            .iter()
+            .any(|a| self.held.get(a).is_none_or(|t| now >= *t))
+        {
             until = now;
         }
         // `self.tx` keeps the channel open, so this only ever times out.
@@ -281,6 +327,25 @@ impl Drop for Poller {
 }
 
 /// 4 s, 8 s, 16 s, ... up to five minutes.
+/// How long to leave a provider that rate-limited an inbox alone, after
+/// `tries` refusals in a row before this one: its `Retry-After` if it gave
+/// one, else the poll interval doubled for each earlier refusal; at most
+/// [`crate::http::MAX_RETRY_AFTER`], never less than the interval. `None`
+/// if `e` isn't a rate limit.
+pub(crate) fn rate_limit_pause(
+    e: &crate::error::Error,
+    tries: u32,
+    interval: Duration,
+) -> Option<Duration> {
+    let crate::error::Error::RateLimited { provider } = e else {
+        return None;
+    };
+    let interval = interval.max(Duration::from_secs(1));
+    let pause = crate::http::retry_after(provider)
+        .unwrap_or_else(|| interval.saturating_mul(1 << tries.min(8)));
+    Some(pause.clamp(interval, crate::http::MAX_RETRY_AFTER.max(interval)))
+}
+
 fn backoff(failures: u32) -> Duration {
     Duration::from_secs(2u64 << failures.min(8)).min(MAX_BACKOFF)
 }
@@ -458,6 +523,32 @@ mod tests {
         let mut poller = Poller::new(Duration::from_secs(5), false);
         poller.subscribe(&Fake { mails: 1 }, &inbox());
         assert!(poller.streams.is_empty());
+    }
+
+    #[test]
+    fn a_rate_limited_inbox_is_held_back_even_from_push() {
+        // Review of retest F6: a push wake-up listed a rate-limited inbox
+        // at once.
+        let mut p = Poller::new(Duration::from_secs(5), true);
+        let limited: crate::error::Result<()> = Err(crate::error::Error::RateLimited {
+            provider: "nobody".into(),
+        });
+        p.polled_result("a@x.com", &limited, 0);
+        p.woken.insert("a@x.com".into());
+        assert!(!p.is_due("a@x.com"));
+        // The loop doesn't spin on that wake-up meanwhile.
+        p.held.insert(
+            "a@x.com".into(),
+            Instant::now() + Duration::from_millis(300),
+        );
+        let t = Instant::now();
+        p.sleep(Some(Instant::now() + Duration::from_millis(200)));
+        assert!(t.elapsed() >= Duration::from_millis(150));
+        // Past the hold, the wake-up counts again; a listing clears it.
+        p.held.insert("a@x.com".into(), Instant::now());
+        assert!(p.is_due("a@x.com"));
+        p.polled_result("a@x.com", &Ok(()), 0);
+        assert!(p.held.is_empty());
     }
 
     #[test]

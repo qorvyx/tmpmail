@@ -217,7 +217,8 @@ impl Watcher {
                 poller.subscribe(p, inbox);
                 Ok(list)
             });
-            self.poller.polled(&address, result.is_ok());
+            let tries = u32::from(result.is_err());
+            self.poller.polled_result(&address, &result, tries);
             let live = self.poller.is_live(&address);
             if !front.listed(address, result.map_err(|e| e.to_string()), live) {
                 return false;

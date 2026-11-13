@@ -14,6 +14,56 @@ use crate::render::clean_line;
 const USER_AGENT: &str = concat!("tmpmail/", env!("CARGO_PKG_VERSION"));
 const MAX_RETRIES: u32 = 3;
 
+/// The longest a provider's `Retry-After` is followed, past the request's
+/// own retries, by the commands that wait (`wait`, `otp --wait`, `watch`).
+pub(crate) const MAX_RETRY_AFTER: Duration = Duration::from_secs(120);
+
+/// Until when each provider (by id) asked, with `Retry-After`, not to be
+/// called again, after a rate limit the request's own retries didn't get
+/// past.
+static RETRY_AFTER: Mutex<Vec<(&'static str, std::time::Instant)>> = Mutex::new(Vec::new());
+
+/// How long `provider`'s last `Retry-After` still asks to wait, at most
+/// [`MAX_RETRY_AFTER`]; `None` if it gave none, or it is over.
+pub(crate) fn retry_after(provider: &str) -> Option<Duration> {
+    let now = std::time::Instant::now();
+    RETRY_AFTER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(p, _)| *p == provider)
+        .map(|(_, until)| until.saturating_duration_since(now))
+        .filter(|d| !d.is_zero())
+        .map(|d| d.min(MAX_RETRY_AFTER))
+}
+
+fn record_retry_after(provider: &'static str, wait: Option<Duration>) {
+    let mut all = RETRY_AFTER.lock().unwrap_or_else(PoisonError::into_inner);
+    all.retain(|(p, _)| *p != provider);
+    if let Some(wait) = wait {
+        all.push((
+            provider,
+            std::time::Instant::now() + wait.min(MAX_RETRY_AFTER),
+        ));
+    }
+}
+
+fn has_retry_after(provider: &str) -> bool {
+    RETRY_AFTER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .any(|(p, _)| *p == provider)
+}
+
+/// A `Retry-After` in seconds (the HTTP-date form isn't read).
+fn retry_after_header(resp: &Response) -> Option<u64> {
+    resp.headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
 /// The config's `http_timeout`, 0 while it isn't set.
 static CONFIGURED_TIMEOUT: AtomicU64 = AtomicU64::new(0);
 
@@ -102,17 +152,21 @@ impl Http {
             let status = resp.status();
             if status == StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
                 attempt += 1;
-                let wait = resp
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .unwrap_or(1 << attempt)
-                    .min(30);
+                let wait = retry_after_header(&resp).unwrap_or(1 << attempt).min(30);
                 sleep(Duration::from_secs(wait));
                 continue;
             }
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                record_retry_after(
+                    self.provider,
+                    retry_after_header(&resp).map(Duration::from_secs),
+                );
+            }
             if status.is_success() {
+                // An old `Retry-After` is over once the provider answers.
+                if attempt > 0 || has_retry_after(self.provider) {
+                    record_retry_after(self.provider, None);
+                }
                 return Ok(resp);
             }
             // Only the start is quoted; the rest isn't read.
@@ -336,6 +390,31 @@ fn snippet(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rate_limit_that_outlasts_the_retries_keeps_its_retry_after() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/x")
+            .with_status(429)
+            .with_header("retry-after", "0")
+            .expect(4)
+            .create();
+        let http = Http::new("retry-test");
+        let url = format!("{}/x", server.url());
+        let err = http.send(|| http.client().get(&url)).unwrap_err();
+        assert!(matches!(err, Error::RateLimited { .. }), "{err}");
+        // `Retry-After: 0` asks for no wait.
+        assert_eq!(retry_after("retry-test"), None);
+        record_retry_after("retry-test", Some(Duration::from_secs(90)));
+        let left = retry_after("retry-test").unwrap();
+        assert!(left > Duration::from_secs(80) && left <= Duration::from_secs(90));
+        // Capped.
+        record_retry_after("retry-test", Some(Duration::from_secs(86_400)));
+        assert!(retry_after("retry-test").unwrap() <= MAX_RETRY_AFTER);
+        record_retry_after("retry-test", None);
+        assert_eq!(retry_after("retry-test"), None);
+    }
     use std::io::{BufRead, BufReader, Write};
 
     /// A server that answers one request with a line every 250 ms for

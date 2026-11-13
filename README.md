@@ -383,7 +383,7 @@ Every option is explained in [docs/usage.md](docs/usage.md), and the `--json` ou
 |---|---|
 | 0 | success |
 | 1 | other error |
-| 2 | `wait` timed out |
+| 2 | `wait` timed out (rate limits are waited out until then) |
 | 3 | the service failed (down, rate limited, login refused, bad answer) |
 | 4 | nothing found (no inbox, no such message, no code in the message) |
 | 64 | usage error (bad flag, or an option this service doesn't support) |

@@ -33,6 +33,10 @@ fn base64(bytes: &[u8]) -> String {
 
 /// How often a cancellable wait checks its flag while sleeping.
 const CANCEL_CHECK: Duration = Duration::from_millis(250);
+/// How far a provider's clock may be behind: mail dated this long before a
+/// wait started still counts as new when the inbox couldn't be listed at
+/// the start.
+const BASELINE_SKEW: i64 = 10;
 
 /// One line of `tmpmail providers`.
 #[derive(Serialize)]
@@ -644,10 +648,27 @@ impl App {
 
         // Keyed by (inbox, message id): ids are only unique per inbox.
         let mut seen: HashSet<(usize, String)> = HashSet::new();
+        let mut failing: HashSet<usize> = HashSet::new();
+        let mut poller = Poller::new(Duration::from_secs(interval), self.config.push());
+        // Inboxes whose mail from before the wait couldn't be listed: a
+        // rate limit (retest F6: the app and the TUI on the same inbox), or
+        // with `-a` a provider that is down. Their first listing tells the
+        // old mail from the new by its date.
+        let started = chrono::Utc::now() - chrono::Duration::seconds(BASELINE_SKEW);
+        let mut unlisted: HashSet<usize> = HashSet::new();
         if !f.include_existing {
             for &n in &targets.clone() {
-                match self.with_inbox_at(n, |p, inbox| p.list(inbox)) {
+                let address = self.state.inboxes[n].address.clone();
+                let result = self.with_inbox_at(n, |p, inbox| p.list(inbox));
+                let limited = matches!(result, Err(Error::RateLimited { .. }));
+                match result {
                     Ok(list) => seen.extend(list.into_iter().map(|s| (n, s.id))),
+                    Err(e) if limited || (all && e.is_provider_failure()) => {
+                        self.warn(&format!("{e}; will keep trying"));
+                        failing.insert(n);
+                        unlisted.insert(n);
+                        poller.polled_result(&address, &Err::<(), _>(e), 0);
+                    }
                     Err(e) if all => self.skip_or_warn(&mut targets, n, &e),
                     Err(e) => return Err(e),
                 }
@@ -661,7 +682,6 @@ impl App {
             self.targets_label(&targets)
         ));
 
-        let mut failing: HashSet<usize> = HashSet::new();
         // Inboxes whose mail from before the wait hasn't all been looked at
         // yet (with `include_existing`): there the newest match wins, so a
         // code from an earlier try doesn't beat the one just sent.
@@ -670,7 +690,6 @@ impl App {
         } else {
             HashSet::new()
         };
-        let mut poller = Poller::new(Duration::from_secs(interval), self.config.push());
         loop {
             self.check_cancel()?;
             for n in targets.clone() {
@@ -681,6 +700,13 @@ impl App {
                 else {
                     continue;
                 };
+                if unlisted.remove(&n) {
+                    seen.extend(
+                        list.iter()
+                            .filter(|s| s.date.is_none_or(|d| d < started))
+                            .map(|s| (n, s.id.clone())),
+                    );
+                }
                 // New arrivals oldest first, so the first matching one wins.
                 if !existing.contains(&n) {
                     list.reverse();
@@ -757,7 +783,8 @@ impl App {
             poller.subscribe(p, inbox);
             Ok(list)
         });
-        poller.polled(&address, result.is_ok());
+        let tries = u32::from(failing.contains(&n));
+        poller.polled_result(&address, &result, tries);
         match result {
             Ok(list) => {
                 if failing.remove(&n) {
@@ -1533,6 +1560,164 @@ mod tests {
         fn get(&self, _: &mut Inbox, id: &str) -> Result<Message> {
             self.message(id).ok_or_else(|| Error::NotFound(id.into()))
         }
+    }
+
+    /// Rate-limited for its first `limited` listings, then empty, then
+    /// with a code.
+    struct Limited {
+        limited: usize,
+        calls: std::sync::atomic::AtomicUsize,
+        /// Once let through: an old code and one dated now, at once.
+        dated: bool,
+    }
+
+    impl Provider for Limited {
+        fn id(&self) -> &'static str {
+            "fake"
+        }
+        fn name(&self) -> &'static str {
+            "Fake"
+        }
+        fn website(&self) -> &'static str {
+            ""
+        }
+        fn caps(&self) -> Capabilities {
+            Fixed {
+                mail: Vec::new(),
+                deletes: false,
+            }
+            .caps()
+        }
+        fn domains(&self) -> Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        fn create(&self, _: &CreateOpts) -> Result<Inbox> {
+            unimplemented!()
+        }
+        fn list(&self, inbox: &mut Inbox) -> Result<Vec<Summary>> {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n < self.limited {
+                return Err(Error::RateLimited {
+                    provider: "fake-limited".into(),
+                });
+            }
+            if self.dated {
+                return Ok(vec![
+                    self.get(inbox, "new")?.summary(),
+                    self.get(inbox, "old")?.summary(),
+                ]);
+            }
+            if n == self.limited {
+                return Ok(Vec::new());
+            }
+            Ok(vec![self.get(inbox, "m")?.summary()])
+        }
+        fn get(&self, _: &mut Inbox, id: &str) -> Result<Message> {
+            let (code, date) = match id {
+                "old" => (
+                    "111222",
+                    Some(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()),
+                ),
+                "new" => ("482913", Some(Utc::now())),
+                _ => ("482913", None),
+            };
+            Ok(Message {
+                id: id.into(),
+                subject: format!("Your code is {code}"),
+                text: Some(format!("Your code is {code}")),
+                date,
+                ..Default::default()
+            })
+        }
+    }
+
+    #[test]
+    fn wait_keeps_waiting_through_a_rate_limit() {
+        // Retest F6: `wait` exited 3 when its first listing was rate limited.
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::for_test(dir.path().to_path_buf());
+        app.set_provider(Box::new(Limited {
+            limited: 2,
+            calls: Default::default(),
+            dated: false,
+        }));
+        let inbox = Inbox::new("fake", "a@x.com".into(), Value::Null);
+        app.state = app.store.update(|s| s.add(inbox)).unwrap().0;
+        let filter = WaitFilter {
+            timeout: Some(20),
+            interval: Some(1),
+            ..Default::default()
+        };
+        let start = Instant::now();
+        let (_, _, _, code) = app
+            .wait_for(&filter, |m, body| extract::otp(&m.subject, body, None))
+            .unwrap();
+        assert_eq!(code, "482913");
+        // Backed off: 1 s, then 2 s.
+        assert!(
+            start.elapsed() >= Duration::from_secs(3),
+            "{:?}",
+            start.elapsed()
+        );
+
+        // Rate limited all along: the wait's own timeout, not exit 3.
+        app.set_provider(Box::new(Limited {
+            limited: usize::MAX,
+            calls: Default::default(),
+            dated: false,
+        }));
+        let filter = WaitFilter {
+            timeout: Some(2),
+            interval: Some(1),
+            ..Default::default()
+        };
+        let err = app
+            .wait_for(&filter, |m, body| extract::otp(&m.subject, body, None))
+            .unwrap_err();
+        assert!(matches!(err, Error::Timeout(2)), "{err}");
+        assert_eq!(err.exit_code(), 2);
+
+        // Mail that came while the inbox couldn't be listed counts as new
+        // (by its date); mail from before the wait doesn't.
+        app.set_provider(Box::new(Limited {
+            limited: 1,
+            calls: Default::default(),
+            dated: true,
+        }));
+        let filter = WaitFilter {
+            timeout: Some(10),
+            interval: Some(1),
+            ..Default::default()
+        };
+        let (_, msg, _, code) = app
+            .wait_for(&filter, |m, body| extract::otp(&m.subject, body, None))
+            .unwrap();
+        assert_eq!((msg.id.as_str(), code.as_str()), ("new", "482913"));
+    }
+
+    #[test]
+    fn a_rate_limit_pause_follows_retry_after_within_limits() {
+        use crate::push::rate_limit_pause;
+        let limited = Error::RateLimited {
+            provider: "nobody".into(),
+        };
+        assert_eq!(
+            rate_limit_pause(&limited, 0, Duration::from_secs(5)),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            rate_limit_pause(&limited, 2, Duration::from_secs(5)),
+            Some(Duration::from_secs(20))
+        );
+        assert_eq!(
+            rate_limit_pause(&limited, 30, Duration::from_secs(5)),
+            Some(crate::http::MAX_RETRY_AFTER)
+        );
+        let down = Error::Unreachable {
+            provider: "nobody".into(),
+            detail: "x".into(),
+        };
+        assert_eq!(rate_limit_pause(&down, 0, Duration::from_secs(5)), None);
     }
 
     fn app_with(dir: &std::path::Path, p: Fixed) -> App {

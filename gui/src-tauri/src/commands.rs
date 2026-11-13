@@ -318,8 +318,7 @@ pub async fn open_link(
         mail.links.get(index).cloned().ok_or("no such link")?
     };
     let url = web_url(&link).ok_or("only http and https links open")?;
-    app.opener()
-        .open_url(url.as_str(), None::<&str>)
+    crate::open_in_browser(&app, url.as_str())
         .map_err(|e| format!("Couldn't open the link: {e}. Copy it and paste it in a browser."))
 }
 

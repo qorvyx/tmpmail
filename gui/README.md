@@ -211,6 +211,18 @@ its desktop file, so without one:
   notification's `app_icon` show it. GNOME Shell takes the app icon from the installed desktop entry
   only, so there the header keeps a generic icon until the AppImage is integrated (below);
   until then the app also hands GNOME the logo as the notification's image (`image-path`).
+- **Color emoji (COLRv1 fonts):** the WebKitGTK the AppImage carries was built against an
+  older FreeType than most systems now have (it uses the system's), and FreeType 2.13
+  changed how COLRv1 color glyphs are handed over: its web process dies on the first such
+  glyph and the window goes blank (Fedora's color emoji font, `Noto-COLRv1.ttf`, does it
+  with an emoji in a subject). So at each start the AppImage writes `~/.cache/tmpmail/fonts.conf` and points
+  `FONTCONFIG_FILE` at it before the window opens: it includes the system's own font
+  config (`/etc/fonts/fonts.conf`, or the `FONTCONFIG_FILE` you set) and leaves out COLRv1
+  fonts (files named `*COLRv1*`, and every color font whose `COLR` table is version 1).
+  Emoji then come from the next font that has them: black and white (Noto Emoji, for one),
+  a CBDT color font, or a box where there is none. Other color fonts and every other font
+  are untouched. A browser the app starts for a link gets your own setting back. The deb
+  and rpm use the system's WebKitGTK and don't do this.
 
 To give it a menu entry and the window icon on Wayland, integrate it with
 [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) or
@@ -258,7 +270,7 @@ everything, delete these too, once the app and the CLI are no longer running:
 | Config (`config.toml`, the app's `gui.json`), shared with the CLI | `~/.config/tmpmail` | `~/Library/Application Support/tmpmail` | `%APPDATA%\tmpmail` |
 | Inboxes and their credentials (`state.json`), and `read --html` copies (`view/`), shared with the CLI | `~/.local/state/tmpmail` | `~/Library/Application Support/tmpmail` | `%LOCALAPPDATA%\tmpmail` |
 | The window's own storage (theme, pane widths) | `~/.local/share/io.github.qorvyx.tmpmail` | in `~/Library`: `Application Support/`, `Caches/`, `HTTPStorages/` and `WebKit/io.github.qorvyx.tmpmail`, `Preferences/io.github.qorvyx.tmpmail.plist`, `Saved Application State/io.github.qorvyx.tmpmail.savedState` | `%LOCALAPPDATA%\io.github.qorvyx.tmpmail` |
-| The AppImage's notification logo | `~/.cache/tmpmail` | – | – |
+| The AppImage's notification logo and font config | `~/.cache/tmpmail` | – | – |
 | `read --html` copies for a snap browser | `~/snap/*/common/tmpmail-view` | – | – |
 | An AppImage integrated by hand (as above) | `~/.local/share/applications/tmpmail.desktop`, `~/.local/share/icons/hicolor/*/apps/tmpmail-gui.png`; AppImageLauncher and Gear Lever remove theirs with the AppImage | – | – |
 | Notification settings | KDE: the `[Applications][tmpmail]` group in `~/.config/plasmanotifyrc`; GNOME: `dconf reset -f /org/gnome/desktop/notifications/application/tmpmail/`; Xfce: `tmpmail` in xfce4-notifyd's known applications, listed by `xfconf-query -c xfce4-notifyd -p /applications/known_applications` (and in `/applications/muted_applications` if you muted it): `-r` on that property drops the whole list (xfce4-notifyd adds each app back the next time it notifies), or set it again without `tmpmail` (`-s NAME` once per app left, with `--force-array`) | System Settings → Notifications keeps an entry | Settings → System → Notifications keeps an entry |

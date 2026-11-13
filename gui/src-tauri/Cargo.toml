@@ -57,4 +57,7 @@ gdkwayland-sys = "0.18.2"
 # Turning off the postMessage IPC route (caller.rs); already in the tree
 # through wry, on every OS below.
 webkit2gtk = "2.0.2"
+# The openers tauri-plugin-opener runs, started here with the user's own
+# font config when the AppImage changed it (fonts.rs); already in the tree.
+open = "5.4.5"
 zbus = { version = "5.13.2", default-features = false, features = ["blocking-api", "async-io"] }

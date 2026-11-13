@@ -66,17 +66,29 @@ const LOGO: &[u8] = include_bytes!("../icons/128x128.png");
 /// own file is under `$APPDIR`. (`APPIMAGE` and `APPDIR` alone could come
 /// from another AppImage this was started from.)
 fn in_appimage() -> bool {
-    let (Some(appdir), Ok(exe)) = (std::env::var_os("APPDIR"), std::env::current_exe()) else {
-        return false;
-    };
-    std::env::var_os("APPIMAGE").is_some() && exe.starts_with(appdir)
+    appimage_dir().is_some()
 }
 
-fn dirs_cache() -> Option<PathBuf> {
+/// The AppImage's mount (or extracted folder), `$APPDIR`, when this program
+/// runs from it ([`in_appimage`]).
+pub(crate) fn appimage_dir() -> Option<PathBuf> {
+    let appdir = PathBuf::from(std::env::var_os("APPDIR")?);
+    let exe = std::env::current_exe().ok()?;
+    (std::env::var_os("APPIMAGE").is_some() && appdir.is_absolute() && exe.starts_with(&appdir))
+        .then_some(appdir)
+}
+
+/// The cache folder: `$XDG_CACHE_HOME`, else `~/.cache`.
+pub(crate) fn dirs_cache() -> Option<PathBuf> {
     std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .filter(|h| h.is_absolute())
+                .map(|h| h.join(".cache"))
+        })
 }
 
 /// Writes [`LOGO`] to `path` (unless it is there already) and returns its

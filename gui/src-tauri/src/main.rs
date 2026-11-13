@@ -11,6 +11,8 @@ mod caller;
 mod commands;
 mod drag;
 #[cfg(target_os = "linux")]
+mod fonts;
+#[cfg(target_os = "linux")]
 mod freedesktop;
 mod notify;
 mod scheme;
@@ -20,6 +22,15 @@ mod worker;
 
 #[cfg(debug_assertions)]
 mod probe;
+
+#[cfg(test)]
+mod test_support {
+    /// Held by every test that starts a process, and by those that check
+    /// a file lock is freed: a child started meanwhile holds a copy of the
+    /// lock's file until it runs its program, and with it the lock.
+    #[cfg(unix)]
+    pub static SPAWNING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -344,6 +355,18 @@ fn app_page(url: &Url) -> bool {
 /// Mail links open as popups (`target="_blank"`). None is ever created: the
 /// link goes to the system browser or mail client, if its scheme is one we
 /// trust.
+/// Opens a web (or `mailto:`) address in the user's browser. The
+/// AppImage starts it with the user's own font config (`fonts::open_url`).
+fn open_in_browser(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if let Some(opened) = fonts::open_url(url) {
+        return opened.map_err(|e| e.to_string());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 fn popup(app: &tauri::AppHandle, shared: &Shared, url: &Url) {
     #[cfg(debug_assertions)]
     if let Some(p) = &shared.probe {
@@ -357,7 +380,7 @@ fn popup(app: &tauri::AppHandle, shared: &Shared, url: &Url) {
         _ => None,
     };
     if let Some(target) = target
-        && let Err(e) = app.opener().open_url(&target, None::<&str>)
+        && let Err(e) = open_in_browser(app, &target)
     {
         eprintln!("tmpmail-gui: could not open {target}: {e}");
     }
@@ -409,6 +432,10 @@ fn plain_mailto(url: &Url) -> Option<String> {
 }
 
 fn main() {
+    // First, while no other thread runs, and before GTK and WebKit start:
+    // the AppImage's WebKit can't draw COLRv1 color fonts (see `fonts`).
+    #[cfg(target_os = "linux")]
+    fonts::avoid_colrv1();
     // Before GTK starts, which would set it from the binary's name. It is
     // also the tray icon's title on Linux (libappindicator's `Title` falls
     // back to the application name, and that to the program name).

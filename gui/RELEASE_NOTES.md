@@ -55,6 +55,11 @@ what breaks:
   so there the app hands it the logo as the notification's image instead, and the header
   shows the logo once the AppImage is integrated. The window's icon on Wayland also needs
   the AppImage integrated (AppImageLauncher, Gear Lever, or by hand): the README says how.
+- **AppImage: color emoji no longer blank the window.** The WebKitGTK the AppImage
+  carries crashed on COLRv1 color emoji (Fedora's emoji font): an emoji in a subject
+  turned the window blank, on every start while that mail was listed. The AppImage now
+  leaves COLRv1 fonts out of its own font setup, so those emoji show in black and white
+  (or from another color emoji font) instead. The deb and rpm aren't affected.
 - **The tray's "Copy code" works right after a start.** It offered only codes that arrived
   while the app ran, so after a restart it was greyed out although a code had come minutes
   before. It now also offers the newest code of the last 15 minutes already in an inbox.

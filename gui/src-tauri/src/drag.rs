@@ -407,6 +407,9 @@ mod tests {
         // Review of the security round: a second start deleted the drag
         // folder of an app that had run for more than ten minutes, and
         // drag-out failed in it until a restart.
+        let _spawning = crate::test_support::SPAWNING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let temp = tempfile::tempdir().unwrap();
         let long_ago = std::time::SystemTime::now() - KEEP - Duration::from_secs(60);
         let folder = |name: &str, at: std::time::SystemTime| {

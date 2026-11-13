@@ -107,6 +107,8 @@ tool's, which has no `.deb`, `.rpm`, `.AppImage`, `.dmg` or `.exe`.)
 - The AppImage may need `libfuse2`. Without FUSE, run it with `--appimage-extract-and-run`
   ([details](gui/README.md#without-fuse---appimage-extract-and-run)). It adds no menu entry
   by itself; AppImageLauncher or Gear Lever add one ([or by hand](gui/README.md#the-appimage)).
+  It shows COLRv1 color emoji (Fedora's) in black and white, since the WebKit it carries
+  can't draw them ([why](gui/README.md#the-appimage)).
 - On NVIDIA, if the window stays blank, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 - Uninstalling keeps your settings and inboxes, since the command-line tool shares them.
   [How to remove everything](gui/README.md#removing-it).

@@ -5092,6 +5092,7 @@ dependencies = [
  "notify-rust",
  "objc2-foundation",
  "objc2-web-kit",
+ "open",
  "serde",
  "serde_json",
  "tauri",

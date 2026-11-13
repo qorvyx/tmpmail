@@ -10,11 +10,14 @@
   const inbox = $derived(app.current);
   const caps = $derived(inbox ? app.provider(inbox.provider)?.caps : undefined);
   let allLinks = $state(false);
+  let pane = $state<HTMLElement>();
   const links = $derived(m ? (allLinks ? m.links : m.links.slice(0, 1)) : []);
 
   $effect(() => {
     void m?.key;
     allLinks = false;
+    // The pane scrolls as a whole: another message opens at its top.
+    if (pane) pane.scrollTop = 0;
   });
 
   function parts(link: string): { host: string; rest: string } {
@@ -32,9 +35,13 @@
   }
 </script>
 
-<section class="@container flex h-full min-h-0 min-w-0 flex-col bg-raised" aria-label="Message">
+<!-- A short pane scrolls as a whole: the header (code, links, attachments)
+     is never squeezed into a box of its own, and the body keeps a usable
+     height under it (scrolled to its end, the pane shows the whole body;
+     the mail's own scrolling hands over to the pane at its ends). -->
+<section bind:this={pane} class="@container flex h-full min-h-0 min-w-0 flex-col overflow-y-auto bg-raised" aria-label="Message">
   {#if m && app.init}
-    <div class="max-h-[58%] shrink-0 overflow-y-auto border-b border-rule">
+    <div class="shrink-0 border-b border-rule">
       <header class="px-6 pt-5 pb-3">
         <h2 class="selectable text-xl leading-tight font-semibold tracking-[-0.02em] break-words">
           {m.subject || "(no subject)"}
@@ -73,6 +80,8 @@
           >
         </div>
 
+        <!-- A narrow pane: the buttons show only their icons, on one row
+             (their names stay in the tooltip and for screen readers). -->
         <div class="mt-3 -ml-2.5 flex flex-wrap items-center gap-1" role="toolbar" aria-label="Message view">
           {#if m.html}
             <button
@@ -82,7 +91,7 @@
               onclick={() => (app.images = !app.images)}
               title="Load remote images, over https only. The sender can see that you opened the mail."
             >
-              <Icon name="image" size={14} />{app.images ? "Images on (https)" : "Load images (https)"}
+              <Icon name="image" size={14} /><span class="@max-md:sr-only">{app.images ? "Images on (https)" : "Load images (https)"}</span>
             </button>
             {#if theme.resolved === "dark"}
               <button
@@ -92,7 +101,7 @@
                 onclick={() => (app.original = !app.original)}
                 title="Show the mail in the sender's own colors"
               >
-                <Icon name="contrast" size={14} />Original colors
+                <Icon name="contrast" size={14} /><span class="@max-md:sr-only">Original colors</span>
               </button>
             {/if}
           {/if}
@@ -103,7 +112,7 @@
               onclick={() => (app.source = !app.source)}
               title={caps?.raw ? "Show the raw message source" : "Show the HTML source"}
             >
-              <Icon name="code" size={14} />Source
+              <Icon name="code" size={14} /><span class="@max-md:sr-only">Source</span>
             </button>
           {/if}
           <span class="flex-1"></span>
@@ -113,7 +122,7 @@
               onclick={() => (app.confirm = { kind: "message", address: m.address, id: m.id, subject: m.subject })}
               title="Delete the message (d)"
             >
-              <Icon name="trash" size={14} />Delete
+              <Icon name="trash" size={14} /><span class="@max-md:sr-only">Delete</span>
             </button>
           {/if}
         </div>
@@ -200,7 +209,7 @@
         </div>
       {/if}
     </div>
-    <div class="min-h-0 flex-1">
+    <div class="min-h-[max(16rem,50%)] flex-1">
       <Preview
         origin={app.init.origin}
         mailKey={m.key}

@@ -109,7 +109,11 @@ class AppState {
   toast(kind: Toast["kind"], text: string, action?: Toast["action"], opens?: Toast["opens"]) {
     const id = ++this.#toastId;
     this.toasts = [...this.toasts.slice(-3), { id, kind, text, action, opens }];
-    const ms = kind === "error" ? 9000 : kind === "mail" ? 7000 : 3500;
+    // A long notice or error (one naming a config file's path) stays long
+    // enough to read: about 80 ms a character, up to 30 s; the × closes it
+    // sooner. "New mail" keeps its 7 s, however long the subject.
+    const base = kind === "error" ? 9000 : kind === "mail" ? 7000 : 3500;
+    const ms = kind === "mail" ? base : Math.min(30000, Math.max(base, text.length * 80));
     window.setTimeout(() => this.dismiss(id), ms);
   }
 

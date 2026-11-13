@@ -6,9 +6,12 @@
 //! opened message", never a path. Files are deleted after a while and when
 //! the app quits.
 //!
-//! This uses `drag` (the engine of the third-party `tauri-plugin-drag`)
-//! directly from Rust: the plugin's own command takes any path from the page,
-//! which the page must never choose.
+//! On macOS this uses `drag` (the engine of the third-party
+//! `tauri-plugin-drag`) directly from Rust: the plugin's own command takes
+//! any path from the page, which the page must never choose. On Linux the
+//! drag is GTK's own ([`gtk_drag`]): `drag` stops answering for the file as
+//! soon as the drop is sent, which on X11 comes before the drop target asks
+//! for it, so nothing landed there.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -224,19 +227,106 @@ impl Files {
     }
 }
 
+/// The drag's icon.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const DRAG_ICON: &[u8] = include_bytes!("../icons/32x32.png");
+
 /// Starts dragging `path` out of `window`. Call on the main thread, while
 /// the mouse button is down.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "macos")]
 pub fn start(window: &tauri::WebviewWindow, path: PathBuf) -> Result<(), String> {
-    let icon = drag::Image::Raw(include_bytes!("../icons/32x32.png").to_vec());
+    let icon = drag::Image::Raw(DRAG_ICON.to_vec());
     let item = drag::DragItem::Files(vec![path]);
     let done = |_result, _position| {};
-    #[cfg(target_os = "linux")]
-    let target = window.gtk_window().map_err(|e| e.to_string())?;
-    #[cfg(target_os = "macos")]
-    let target = window.clone();
-    drag::start_drag(&target, item, icon, done, drag::Options::default())
+    drag::start_drag(window, item, icon, done, drag::Options::default())
         .map_err(|e| format!("Couldn't start the drag: {e}. Use Save instead."))
+}
+
+/// Starts dragging `path` out of `window`. Call on the main thread, while
+/// the mouse button is down.
+#[cfg(target_os = "linux")]
+pub fn start(window: &tauri::WebviewWindow, path: PathBuf) -> Result<(), String> {
+    let window = window.gtk_window().map_err(|e| e.to_string())?;
+    gtk_drag(&window, &path).map_err(|e| format!("Couldn't start the drag: {e}. Use Save instead."))
+}
+
+/// The `file://` URI a drop target is given for `path`, percent-encoded
+/// (a name with spaces or accents is no valid URI as it is).
+#[cfg(target_os = "linux")]
+fn file_uri(path: &std::path::Path) -> Result<String, String> {
+    gtk::glib::filename_to_uri(path, None)
+        .map(|u| u.to_string())
+        .map_err(|e| e.to_string())
+}
+
+/// A GTK drag of the file at `path` from `window`, as a copy, offered as
+/// `text/uri-list`. The window answers the
+/// drop target's requests for the file's URI until GTK ends the drag
+/// (`drag-end`, after the drop and its data transfer, or a cancel). Under
+/// X11 (XDND) the target asks for the data only after the drop
+/// (`XdndDrop`, then a selection request), and on Wayland at the drop too,
+/// so the answer must outlive the drop itself. Only this drag's own
+/// requests are answered: a drag of the page's (the webview's) isn't
+/// touched.
+#[cfg(target_os = "linux")]
+fn gtk_drag(window: &gtk::ApplicationWindow, path: &std::path::Path) -> Result<(), String> {
+    use gtk::prelude::*;
+    use gtk::{gdk, gdk_pixbuf};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let uri = file_uri(path)?;
+    let targets = gtk::TargetList::new(&[]);
+    targets.add_uri_targets(0);
+    let ours: Rc<RefCell<Option<gdk::DragContext>>> = Rc::default();
+    let handlers: Rc<RefCell<Vec<gtk::glib::SignalHandlerId>>> = Rc::default();
+    let is_ours = {
+        let ours = ours.clone();
+        move |ctx: &gdk::DragContext| ours.borrow().as_ref() == Some(ctx)
+    };
+    let data = {
+        let is_ours = is_ours.clone();
+        window.connect_drag_data_get(move |_, ctx, data, _, _| {
+            if is_ours(ctx) {
+                data.set_uris(&[uri.as_str()]);
+            }
+        })
+    };
+    let end = {
+        let (ours, handlers) = (ours.clone(), handlers.clone());
+        window.connect_drag_end(move |window, ctx| {
+            if is_ours(ctx) {
+                ours.borrow_mut().take();
+                for id in handlers.borrow_mut().drain(..) {
+                    window.disconnect(id);
+                }
+            }
+        })
+    };
+    handlers.borrow_mut().extend([data, end]);
+    let started = window.drag_begin_with_coordinates(
+        &targets,
+        gdk::DragAction::COPY,
+        // The button that drags (the first), not a modifier mask.
+        1,
+        None,
+        -1,
+        -1,
+    );
+    let Some(ctx) = started else {
+        for id in handlers.borrow_mut().drain(..) {
+            window.disconnect(id);
+        }
+        return Err("the window couldn't start it".into());
+    };
+    *ours.borrow_mut() = Some(ctx.clone());
+    let loader = gdk_pixbuf::PixbufLoader::new();
+    if loader.write(DRAG_ICON).and_then(|_| loader.close()).is_ok()
+        && let Some(icon) = loader.pixbuf()
+    {
+        ctx.drag_set_icon_pixbuf(&icon, 0, 0);
+    }
+    Ok(())
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -247,6 +337,20 @@ pub fn start(_window: &tauri::WebviewWindow, _path: PathBuf) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn dropped_files_are_named_by_a_valid_uri() {
+        // Retest F8 (the URI went out unescaped as well).
+        assert_eq!(
+            file_uri(std::path::Path::new(
+                "/tmp/tmpmail-drag-x/1-0/résumé été ✓ #1.txt"
+            ))
+            .unwrap(),
+            "file:///tmp/tmpmail-drag-x/1-0/r%C3%A9sum%C3%A9%20%C3%A9t%C3%A9%20%E2%9C%93%20%231.txt"
+        );
+        assert!(file_uri(std::path::Path::new("relative.txt")).is_err());
+    }
 
     #[test]
     fn prepared_files_are_private_and_deleted() {

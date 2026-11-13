@@ -11,6 +11,11 @@ what breaks:
 
 ## What's new in 0.1.4
 
+- **Dragging an attachment out works on X11.** On Xfce (and other X11 desktops) the drag
+  started and the file manager lit up, but nothing landed: the drag code stopped answering
+  for the file as soon as the drop was sent, and on X11 the drop target asks for it only
+  then. The app now runs the drag with GTK itself and answers until the drag ends; the
+  file's address is also properly escaped now (names with spaces or accents).
 - **In-page links work in the message.** A mail's links to its own sections (`#section`, a
   table of contents) went nowhere: the sanitizer dropped the `id` and `name` they point at,
   and the frame opened every link as a popup. Those are kept now, prefixed so a mail can't
@@ -36,17 +41,20 @@ what breaks:
   listened, so only the terminal saw it; and a save that changed none of the form's fields
   didn't read the file again, so a key added by hand went unnoticed. Notices are now held
   until the window is ready, and every save reads the file again. Polling restarts only
-  when the poll interval, push or the timeout changed.
+  when the poll interval, push or the timeout changed. A notice with a long text (a file's
+  path) stays up longer, up to 30 s, or until its × closes it.
 - **`j`/`k` keep the open message in view.** Past the last visible row the message opened
   but the list stayed put; it now scrolls just enough to show it. `[`/`]` do the same in
   the inbox list.
 - **Long mail from mail.tm shows whole.** mail.tm cuts a message's text at 100 KiB without
   a word; the app (through the core of CLI 0.3.5) now reads the rest from the raw message,
   or says the text may be cut and that Source has all of it.
-- **AppImage: notifications show the logo.** Without an installed desktop file GNOME showed
-  a generic icon on them; they now name the logo by a file in the cache folder. The window's
-  icon on Wayland still needs the AppImage integrated (AppImageLauncher, Gear Lever, or by
-  hand): the README says how.
+- **AppImage: notifications show the logo.** Without an installed desktop file they showed
+  a generic icon; they now name the logo by a file in the cache folder, which servers that
+  go by `app_icon` show. GNOME takes the header's icon from an installed desktop entry only,
+  so there the app hands it the logo as the notification's image instead, and the header
+  shows the logo once the AppImage is integrated. The window's icon on Wayland also needs
+  the AppImage integrated (AppImageLauncher, Gear Lever, or by hand): the README says how.
 - **The tray's "Copy code" works right after a start.** It offered only codes that arrived
   while the app ran, so after a restart it was greyed out although a code had come minutes
   before. It now also offers the newest code of the last 15 minutes already in an inbox.
@@ -57,7 +65,10 @@ what breaks:
   sender's name ran over the date and the links were cut to a letter or two. The message
   list now gives way (down to 280 px) so the open message keeps 340 px where it can, the
   sender's address and the date move to their own lines, and a link's address gets up to two
-  lines with its buttons under it.
+  lines with its buttons under it. The message's header (its buttons, the code, the links,
+  the attachments) is no longer squeezed into a short box of its own that hid the Link
+  row's buttons: a short pane scrolls as a whole, the body keeps at least half of it, and
+  in a narrow pane the view buttons show only their icons.
 - **A refused label's reason is in view.** In a 1280×800 window the new inbox dialog
   scrolls, and the reason under the label field sat below its visible part; the dialog now
   scrolls to it.

@@ -178,9 +178,13 @@ wheel or the scrollbar.
 
 ## Dragging attachments out
 
-Best effort, on Linux and macOS. It uses `drag` 2.1.1, the engine of the third-party
-`tauri-plugin-drag` (CrabNebula), from Rust: the plugin's own command takes any file path
-from the page, and the page never names a path, only "attachment N of the opened message".
+Best effort, on Linux and macOS. On macOS it uses `drag` 2.1.1, the engine of the
+third-party `tauri-plugin-drag` (CrabNebula), from Rust: the plugin's own command takes any
+file path from the page, and the page never names a path, only "attachment N of the opened
+message". On Linux it is GTK's own drag, started from Rust the same way: a copy of the file,
+offered as `text/uri-list`, whose data the window gives for as long as GTK runs the drag.
+(`drag` stopped answering once the drop was sent, and on X11 a drop target asks for the
+file only after that, so before 0.1.4 nothing landed on X11 desktops such as Xfce.)
 When the pointer reaches an attachment's grip, Rust downloads it into a private temporary
 directory (`tmpmail-drag-*`, mode 0700, one 0700 subdirectory per attachment, the file
 0600 under its sanitized name); dragging the grip then drags that file. Files are deleted
@@ -203,8 +207,10 @@ its desktop file, so without one:
   speak it.
 - **Notifications:** they name the logo by a file the app writes to
   `~/.cache/tmpmail/tmpmail-gui.png` (a path inside the AppImage's mount would be gone
-  once it quits, and notification histories keep the icon), so they show the logo (from
-  0.1.4; GNOME showed a generic icon in 0.1.3).
+  once it quits, and notification histories keep the icon). Servers that go by the
+  notification's `app_icon` show it. GNOME Shell takes the app icon from the installed desktop entry
+  only, so there the header keeps a generic icon until the AppImage is integrated (below);
+  until then the app also hands GNOME the logo as the notification's image (`image-path`).
 
 To give it a menu entry and the window icon on Wayland, integrate it with
 [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) or
@@ -255,13 +261,14 @@ everything, delete these too, once the app and the CLI are no longer running:
 | The AppImage's notification logo | `~/.cache/tmpmail` | – | – |
 | `read --html` copies for a snap browser | `~/snap/*/common/tmpmail-view` | – | – |
 | An AppImage integrated by hand (as above) | `~/.local/share/applications/tmpmail.desktop`, `~/.local/share/icons/hicolor/*/apps/tmpmail-gui.png`; AppImageLauncher and Gear Lever remove theirs with the AppImage | – | – |
-| Notification settings | KDE: the `[Applications][tmpmail]` group in `~/.config/plasmanotifyrc`; GNOME: `dconf reset -f /org/gnome/desktop/notifications/application/tmpmail/` | System Settings → Notifications keeps an entry | Settings → System → Notifications keeps an entry |
+| Notification settings | KDE: the `[Applications][tmpmail]` group in `~/.config/plasmanotifyrc`; GNOME: `dconf reset -f /org/gnome/desktop/notifications/application/tmpmail/`; Xfce: `tmpmail` in xfce4-notifyd's known applications, listed by `xfconf-query -c xfce4-notifyd -p /applications/known_applications` (and in `/applications/muted_applications` if you muted it): `-r` on that property drops the whole list (xfce4-notifyd adds each app back the next time it notifies), or set it again without `tmpmail` (`-s NAME` once per app left, with `--force-array`) | System Settings → Notifications keeps an entry | Settings → System → Notifications keeps an entry |
 
 On Linux `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` move the
 rows under `~/.config`, `~/.local/state`, `~/.local/share` and `~/.cache`, and
 `TMPMAIL_CONFIG` and `TMPMAIL_STATE_DIR` move the config and the inboxes on every system.
 The drag-out folder (`tmpmail-drag-*` in the temporary folder) goes when the app quits
-normally; after a crash or a killed app it stays until `/tmp` is cleared. No link handler
+normally; one a crashed or killed app left is deleted at the app's next start once it is 10
+minutes old (or when `/tmp` is cleared). No link handler
 is registered on Linux or macOS; on Windows the uninstaller removes the `tmpmail-desktop:`
 one it registered.
 

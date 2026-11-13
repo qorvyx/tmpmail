@@ -29,11 +29,6 @@ toml_edit = "0.25"
 tempfile = "3.27.0"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 
-# Dragging attachments out (the engine of `tauri-plugin-drag`, used from Rust
-# only). Not on Windows: a drag there can hang the whole app (drag-rs #94).
-[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
-drag = "2.1.1"
-
 # Windows: a click on a notification in the notification center starts the
 # app with a link (notify.rs); the plugin hands it to the running app. The
 # toast is built with the WinRT bindings already in the tree.
@@ -42,6 +37,10 @@ tauri-plugin-single-instance = "2.5.5"
 windows = { version = "0.62.2", features = ["Data_Xml_Dom", "UI_Notifications", "Win32_System_Registry"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Dragging attachments out (the engine of `tauri-plugin-drag`, used from
+# Rust only). Linux uses GTK's own drag (drag.rs); not on Windows: a drag
+# there can hang the whole app (drag-rs #94).
+drag = "2.1.1"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString"] }
 objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "WKUserContentController"] }
 

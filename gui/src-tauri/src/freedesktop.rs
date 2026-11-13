@@ -137,6 +137,71 @@ pub fn request(summary: &str, body: &str) -> Request {
     }
 }
 
+/// GNOME Shell takes a notification's app icon from its desktop entry and
+/// ignores `app_icon`, so a plain AppImage (no desktop file installed: its
+/// icon is a `file://` URI, see [`icon`]) showed a generic icon there. For
+/// GNOME the logo also goes as the notification's image (`image-path`),
+/// which GNOME does show; other servers already show `app_icon`, and would
+/// show the logo twice. (Not once `tmpmail.desktop` is installed, see
+/// [`desktop_entry_installed`].)
+fn with_image_for(request: &mut Request, server: &str) {
+    if server == "gnome-shell" && request.icon.starts_with("file://") {
+        request.hints.push(("image-path", request.icon));
+    }
+}
+
+/// The notification server's name (`GetServerInformation`), asked once
+/// it answers; empty until then.
+fn server_name(connection: &Connection) -> String {
+    static NAME: OnceLock<String> = OnceLock::new();
+    if let Some(name) = NAME.get() {
+        return name.clone();
+    }
+    let (destination, path, interface) = BUS;
+    connection
+        .call_method(
+            Some(destination),
+            path,
+            Some(interface),
+            "GetServerInformation",
+            &(),
+        )
+        .ok()
+        .and_then(|r| {
+            r.body()
+                .deserialize::<(String, String, String, String)>()
+                .ok()
+        })
+        .map(|(name, ..)| NAME.get_or_init(|| name).clone())
+        .unwrap_or_default()
+}
+
+/// Whether `DESKTOP_ENTRY.desktop` is installed where desktops look for it
+/// (`$XDG_DATA_HOME`, `$XDG_DATA_DIRS`): an AppImage integrated by hand
+/// as the README says. GNOME then shows the logo from it, and an image
+/// too would show it twice.
+fn desktop_entry_installed() -> bool {
+    let home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
+    let dirs = std::env::var("XDG_DATA_DIRS")
+        .ok()
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+    home.into_iter()
+        .chain(
+            dirs.split(':')
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute()),
+        )
+        .any(|d| {
+            d.join("applications")
+                .join(format!("{DESKTOP_ENTRY}.desktop"))
+                .is_file()
+        })
+}
+
 /// A shown notification.
 struct Shown {
     /// Its id at the server.
@@ -203,6 +268,11 @@ impl Notifier {
 
     fn send(self: &Arc<Self>, request: &Request, target: Option<Target>) -> zbus::Result<()> {
         let connection = self.connection()?;
+        let mut request = request.clone();
+        if request.icon.starts_with("file://") && !desktop_entry_installed() {
+            with_image_for(&mut request, &server_name(&connection));
+        }
+        let request = &request;
         let hints: HashMap<&str, Value<'_>> = request
             .hints
             .iter()
@@ -491,6 +561,32 @@ mod tests {
                 timeout: -1,
             }
         );
+    }
+
+    #[test]
+    fn gnome_gets_the_appimages_logo_as_the_image() {
+        // Retest F7: GNOME showed its generic icon for the plain AppImage.
+        let mut r = request("Code 482913 from GitHub", "Sign in");
+        r.icon = "file:///home/u/.cache/tmpmail/tmpmail-gui.png";
+        let mut gnome = r.clone();
+        with_image_for(&mut gnome, "gnome-shell");
+        assert_eq!(
+            gnome.hints,
+            vec![
+                ("desktop-entry", "tmpmail"),
+                (
+                    "image-path",
+                    "file:///home/u/.cache/tmpmail/tmpmail-gui.png"
+                )
+            ]
+        );
+        // Not elsewhere, and not for an installed app (icon by name).
+        let mut kde = r.clone();
+        with_image_for(&mut kde, "Plasma");
+        assert_eq!(kde.hints, vec![("desktop-entry", "tmpmail")]);
+        let mut installed = request("x", "y");
+        with_image_for(&mut installed, "gnome-shell");
+        assert_eq!(installed.hints, vec![("desktop-entry", "tmpmail")]);
     }
 
     #[test]

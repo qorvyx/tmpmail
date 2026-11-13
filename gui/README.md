@@ -38,9 +38,11 @@ a safe HTML preview in light or dark, and the TUI's actions and keys. Released o
     Source (the raw message where the provider has it, else the HTML).
   - Inline images (`cid:`) show without Load images: the attachment the provider lists
     under that name, else, where the provider has the raw message (mail.tm, mail.gw,
-    DropMail, Maildrop), the part with that `Content-ID` in it. mail.tm lists an inline
-    image only by its file name, so in 0.1.3 its inline images showed only their alt
-    text.
+    DropMail, Maildrop), the part with that `Content-ID` in it. mail.tm and mail.gw
+    rewrite an inline image's `cid:` address to `attachment:ID`, the id of the attachment
+    they list for it; the app reads an image's `attachment:ID` as that image attachment of
+    the same message, and reads mail.tm's raw message, which leaves out the line break
+    after each part's boundary (in 0.1.3 their inline images showed only their alt text).
   - Attachments with name, type and size, and Save (a native save dialog; never overwrites
     an existing file). On Linux and macOS an attachment can also be dragged out by its grip
     to a folder or another app (see "Dragging attachments out").

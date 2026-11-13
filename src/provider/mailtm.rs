@@ -2,6 +2,7 @@
 //! https://docs.mail.tm — private inboxes behind address+password and a JWT.
 //! Its terms ask clients to credit mail.tm, which the README and `--help` do.
 
+use std::borrow::Cow;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
@@ -181,6 +182,74 @@ fn format_addr(v: &Value) -> String {
     }
 }
 
+/// mail.tm (and mail.gw) rewrite an inline image's `cid:` URL in the HTML
+/// they return to `attachment:ID`, the id of the attachment they list for
+/// that part: `<img src="attachment:ATTACH000001">`. No browser or
+/// sanitizer knows that scheme, so the image showed as its alt text. Such
+/// an image source is put back as `cid:ID`, which
+/// [`super::inline_attachment`] matches by the attachment's id, under the
+/// inline images' usual limits: only a `src` attribute (`src=` right after
+/// a space, its value quoted or not) whose whole value is `attachment:`
+/// and the id of one of this message's own listed attachments that may be
+/// shown as an image ([`super::image_type`]). mail.tm writes these itself,
+/// always in that form; anything else (a link, the word in the text,
+/// another id) stays as it is.
+fn attachment_srcs_as_cids<'a>(html: &'a str, attachments: &[Attachment]) -> Cow<'a, str> {
+    const SCHEME: &[u8] = b"attachment:";
+    let images: Vec<&str> = attachments
+        .iter()
+        .filter(|a| super::image_type(&a.content_type, &a.filename).is_some())
+        .map(|a| a.id.as_str())
+        .filter(|id| !id.is_empty())
+        .collect();
+    if images.is_empty() || !html.contains("attachment:") {
+        return Cow::Borrowed(html);
+    }
+    let bytes = html.as_bytes();
+    let mut out = String::new();
+    let mut copied = 0;
+    let mut i = 0;
+    while let Some(at) = html[i..].find("attachment:").map(|p| p + i) {
+        i = at + SCHEME.len();
+        let quote = match at.checked_sub(1).map(|q| bytes[q]) {
+            Some(q @ (b'"' | b'\'')) => Some(q),
+            _ => None,
+        };
+        let eq = at - usize::from(quote.is_some());
+        let attr = eq.checked_sub(4).map(|a| &bytes[a..eq]);
+        let named_src = attr.is_some_and(|a| a.eq_ignore_ascii_case(b"src="))
+            && eq
+                .checked_sub(5)
+                .is_some_and(|b| bytes[b].is_ascii_whitespace());
+        if !named_src {
+            continue;
+        }
+        let closes = |end: usize| match (quote, bytes.get(end)) {
+            (Some(q), Some(&c)) => c == q,
+            (None, None) => true,
+            (None, Some(&c)) => c.is_ascii_whitespace() || c == b'>' || c == b'/',
+            (Some(_), None) => false,
+        };
+        let Some(id) = images
+            .iter()
+            .find(|id| html[i..].starts_with(**id) && closes(i + id.len()))
+        else {
+            continue;
+        };
+        let end = i + id.len();
+        out.push_str(&html[copied..at]);
+        out.push_str("cid:");
+        out.push_str(id);
+        copied = end;
+        i = end;
+    }
+    if copied == 0 {
+        return Cow::Borrowed(html);
+    }
+    out.push_str(&html[copied..]);
+    Cow::Owned(out)
+}
+
 /// Hydra endpoints return a bare array with `Accept: application/json`, but
 /// accept the JSON-LD envelope too in case that changes.
 fn members(v: Value) -> Vec<Value> {
@@ -312,7 +381,7 @@ impl Provider for MailTm {
             Value::String(s) if !s.is_empty() => Some(s.clone()),
             _ => None,
         };
-        let attachments = v["attachments"]
+        let attachments: Vec<Attachment> = v["attachments"]
             .as_array()
             .map(|a| {
                 a.iter()
@@ -345,6 +414,12 @@ impl Provider for MailTm {
             attachments,
         };
         self.whole_bodies(inbox, &mut msg);
+        // After the check for a cut body, which goes by mail.tm's length.
+        if let Some(html) = &msg.html {
+            if let Cow::Owned(rewritten) = attachment_srcs_as_cids(html, &msg.attachments) {
+                msg.html = Some(rewritten);
+            }
+        }
         Ok(msg)
     }
 
@@ -546,6 +621,106 @@ mod tests {
         assert_eq!(
             msg.attachments[0].url.as_deref(),
             Some(format!("{}/messages/m1/attachment/ATT1", s.url()).as_str())
+        );
+    }
+
+    /// mail.tm's `html` for a mail with an inline image: its `cid:` URL
+    /// rewritten to `attachment:` and the attachment's id (ids made up).
+    #[test]
+    fn attachment_srcs_become_cids_of_the_messages_own_images() {
+        let mut s = Server::new();
+        let html = [
+            "<p>Inline image:</p><img src=\"attachment:ATTACH000001\" alt=\"INLINE-ALT\" width=\"120\" height=\"90\">",
+            "<img SRC='attachment:ATTACH000001'><img src=attachment:ATTACH000001>",
+            // Not a listed image, not its whole value, not an image source.
+            "<img src=\"attachment:ATTACH000009\"><img src=\"attachment:ATTACH0000011\">",
+            "<img src=\"attachment:ATTACH000002\"><img data-src=\"attachment:ATTACH000001\">",
+            "<a href=\"https://x.example/?f=attachment:ATTACH000001\">dl</a>",
+            "<p>see attachment:ATTACH000001, \"attachment:ATTACH000001\"</p>",
+        ];
+        s.mock("GET", "/messages/m1")
+            .with_body(
+                json!({"id": "m1", "from": {"address": "a@b.c", "name": ""}, "to": [],
+                "subject": "Inline cid image", "text": "Inline image", "html": html,
+                "createdAt": "2026-11-13T04:00:00+00:00",
+                "attachments": [{"id": "ATTACH000001", "filename": "inline-box.png",
+                    "contentType": "image/png", "disposition": "inline", "size": 1,
+                    "downloadUrl": "/messages/m1/attachment/ATTACH000001"},
+                    {"id": "ATTACH000002", "filename": "report.pdf",
+                    "contentType": "application/pdf", "disposition": "attachment", "size": 1,
+                    "downloadUrl": "/messages/m1/attachment/ATTACH000002"}]})
+                .to_string(),
+            )
+            .create();
+        let p = provider(&s);
+        let mut inbox = Inbox::new(
+            "mailtm",
+            "x@x.com".into(),
+            json!({"password":"pw","token":"t"}),
+        );
+        let msg = p.get(&mut inbox, "m1").unwrap();
+        let got = msg.html.as_deref().unwrap();
+        let mut want = html.concat();
+        for (from, to) in [
+            (
+                "src=\"attachment:ATTACH000001\"",
+                "src=\"cid:ATTACH000001\"",
+            ),
+            ("SRC='attachment:ATTACH000001'", "SRC='cid:ATTACH000001'"),
+            ("src=attachment:ATTACH000001>", "src=cid:ATTACH000001>"),
+        ] {
+            want = want.replacen(from, to, 1);
+        }
+        assert_eq!(got, want);
+        // The CLI and the app find the image by that cid.
+        assert_eq!(crate::render::cid_images(got), vec!["ATTACH000001"]);
+        let (att, mime) = super::super::inline_attachment(&msg, "ATTACH000001").unwrap();
+        assert_eq!(
+            (att.filename.as_str(), mime.as_str()),
+            ("inline-box.png", "image/png")
+        );
+        // Nothing to do: the same text, not a copy.
+        let plain = "<p>no images</p>";
+        assert!(matches!(
+            attachment_srcs_as_cids(plain, &msg.attachments),
+            Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            attachment_srcs_as_cids(html[0], &[]),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    /// The check for a body mail.tm cut goes by the length mail.tm sent,
+    /// before `attachment:` sources are rewritten (which shortens them).
+    #[test]
+    fn a_cut_html_with_inline_images_is_still_checked() {
+        let tag = "<img src=\"attachment:ATTACH000001\">";
+        let mut cut = tag.repeat(BODY_CAP / tag.len());
+        cut.push_str(&"x".repeat(BODY_CAP - cut.len()));
+        let mut s = Server::new();
+        s.mock("GET", "/messages/m1")
+            .with_body(
+                json!({"id": "m1", "from": {"address": "a@b.c", "name": ""}, "to": [],
+                "subject": "Long", "html": [cut], "createdAt": "2026-11-13T04:00:00+00:00",
+                "attachments": [{"id": "ATTACH000001", "filename": "a.png",
+                    "contentType": "image/png", "size": 1}]})
+                .to_string(),
+            )
+            .create();
+        s.mock("GET", "/sources/m1").with_status(500).create();
+        let p = provider(&s);
+        let mut inbox = Inbox::new(
+            "mailtm",
+            "x@x.com".into(),
+            json!({"password":"pw","token":"t"}),
+        );
+        let html = p.get(&mut inbox, "m1").unwrap().html.unwrap();
+        assert!(html.starts_with("<img src=\"cid:ATTACH000001\">"));
+        assert!(
+            html.ends_with("Source in the desktop app.]</b></p>"),
+            "{}",
+            &html[html.len() - 80..]
         );
     }
 

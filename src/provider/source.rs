@@ -272,8 +272,9 @@ fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
             .map_or(body.len(), |p| i + p + 1);
         let line = trim_eol(&body[i..end]);
         if let Some(rest) = line.strip_prefix(delim.as_bytes()) {
+            let glued = glued_header(rest);
             let rest = trim_space(rest);
-            if rest.is_empty() || rest == b"--" {
+            if rest.is_empty() || rest == b"--" || glued {
                 if let Some(s) = start {
                     // The line break before the delimiter belongs to it.
                     out.push(trim_eol(&body[s..i]));
@@ -281,7 +282,8 @@ fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
                 if rest == b"--" {
                     return out;
                 }
-                start = Some(end);
+                // A glued part starts right after the boundary.
+                start = Some(if glued { i + delim.len() } else { end });
             }
         }
         i = end;
@@ -291,6 +293,32 @@ fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
         out.push(&body[s..]);
     }
     out
+}
+
+/// Whether what follows a `--boundary` on its line is the part's first
+/// header, with the line break between them left out, as mail.tm's raw
+/// source has it (`--===============0643065235564387711==Content-Type:
+/// text/plain`). RFC 2046 wants only transport padding (spaces and tabs)
+/// and a CRLF there, but has readers find a boundary at the start of a
+/// line without needing the whole line to match (5.1.1, "NOTE TO
+/// IMPLEMENTORS"), and forbids the boundary inside a part's content. So a
+/// delimiter is still only a line that starts with `--boundary`; what is
+/// accepted besides the RFC's forms is one followed at once by a MIME
+/// header (RFC 2045's `Content-` fields, the only ones a part's headers
+/// define): `Content-`, more of a field name (RFC 5322 `ftext`: printable
+/// ASCII but `:`), and a colon. Anything else after the boundary is not a
+/// delimiter, as before: another boundary that only starts with this one
+/// (`--b2`, `--b_rel` glued to its own header), text after a close
+/// delimiter.
+fn glued_header(rest: &[u8]) -> bool {
+    const FIELD: &[u8] = b"content-";
+    let name = rest
+        .iter()
+        .take_while(|&&b| b.is_ascii_graphic() && b != b':')
+        .count();
+    name > FIELD.len()
+        && rest[..FIELD.len()].eq_ignore_ascii_case(FIELD)
+        && rest.get(name) == Some(&b':')
 }
 
 fn trim_eol(line: &[u8]) -> &[u8] {
@@ -516,6 +544,82 @@ Content-ID: <evil@x>\r\n\
         assert_eq!(images.len(), 1, "{:?}", images.keys());
         assert_eq!(cid_of_url("1793.52%40tmpmail.test"), "1793.52@tmpmail.test");
         assert_eq!(cid_of_url("<a@b>"), "a@b");
+    }
+
+    /// mail.tm's raw source as it comes: each opening boundary glued to
+    /// the part's first header, with no line break (the shape of a mail
+    /// sent by Python's `email` with an inline image, ids made up).
+    const MAILTM_GLUED: &[u8] = b"From: Demo <demo@tmpmail.test>\r\n\
+Subject: Inline cid image\r\n\
+Content-Type: multipart/alternative; boundary=\"===============0643065235564387711==\"\r\n\
+\r\n\
+--===============0643065235564387711==Content-Type: text/plain; charset=\"utf-8\"\r\n\
+Content-Transfer-Encoding: 7bit\r\n\
+\r\n\
+Inline image\r\n\
+--===============0643065235564387711==Content-Type: multipart/related; boundary=\"===============1111==\"\r\n\
+\r\n\
+--===============1111==Content-Type: text/html; charset=\"utf-8\"\r\n\
+\r\n\
+<img src=\"cid:179454008568.191651.9966128619580370714@tmpmail.test\">\r\n\
+--===============1111==Content-Type: image/png\r\n\
+Content-Disposition: inline; filename=\"inline-box.png\"\r\n\
+Content-Transfer-Encoding: base64\r\n\
+Content-ID: <179454008568.191651.9966128619580370714@tmpmail.test>\r\n\
+\r\n\
+iVBORw0KGgoAAA==\r\n\
+--===============1111==--\r\n\
+\r\n\
+--===============0643065235564387711==--\r\n";
+
+    #[test]
+    fn a_boundary_glued_to_the_next_header_still_starts_a_part() {
+        let p = parts(MAILTM_GLUED);
+        assert_eq!(p.len(), 3, "{p:?}");
+        assert_eq!(p[0].content_type, "text/plain");
+        assert_eq!(p[0].text().as_deref(), Some("Inline image"));
+        assert_eq!(p[2].content_type, "image/png");
+        let images = inline_images(MAILTM_GLUED);
+        let (mime, bytes) = &images["179454008568.191651.9966128619580370714@tmpmail.test"];
+        assert_eq!(
+            (mime.as_str(), bytes.as_slice()),
+            ("image/png", &b"\x89PNG\r\n\x1a\n\0\0"[..])
+        );
+        // Nothing else after a boundary is a delimiter: a longer boundary
+        // that starts with this one, a word, text after the close.
+        assert_eq!(
+            split_multipart(
+                b"--b\r\nA: 1\r\n\r\nx\r\n--b2\r\n--b stuff\r\n--bX\r\n--b--junk\r\ny\r\n--b--\r\n",
+                "b"
+            ),
+            vec![&b"A: 1\r\n\r\nx\r\n--b2\r\n--b stuff\r\n--bX\r\n--b--junk\r\ny"[..]]
+        );
+        // A nested boundary that starts with this one, glued to its own
+        // header, isn't one of this multipart's delimiters either.
+        assert_eq!(
+            split_multipart(
+                b"--abc\r\nContent-Type: multipart/related; boundary=abc_rel\r\n\r\n--abc_relContent-Type: text/html\r\n\r\n<p>x</p>\r\n--abc_rel--\r\n--abc--\r\n",
+                "abc"
+            )
+            .len(),
+            1
+        );
+        assert!(glued_header(b"Content-Type: text/plain"));
+        assert!(glued_header(b"content-id: <a@b>"));
+        for not in [
+            &b""[..],
+            b"--",
+            b"--Content-Type: y",
+            b" Content-Type: x",
+            b": x",
+            b"word",
+            b"Subject: x",
+            b"Content-: x",
+            b"_relContent-Type: text/html",
+            b"\xc3\xa9: x",
+        ] {
+            assert!(!glued_header(not), "{not:?}");
+        }
     }
 
     #[test]

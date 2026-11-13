@@ -105,6 +105,12 @@ message's raw source, which is whole, and gives its text and HTML instead. If th
 can't be read (or has no longer body it can decode), `text` ends with a line saying it may
 be cut and that `read --raw` has all of it (`html` with a paragraph saying so).
 
+mail.tm and mail.gw rewrite an inline image's `cid:` address in `html` to `attachment:ID`,
+the `id` of the attachment they list for that image. In an image's `src`, tmpmail puts back
+`cid:ID` where the id is one of the message's own image `attachments`, so `html` refers to
+its inline images by `cid:` as other providers' mail does; any other `attachment:` text
+(links, the text itself, other ids) stays as it is.
+
 ## Other commands
 
 | Command | Output |

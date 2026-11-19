@@ -19,7 +19,8 @@
 //! the bitmap CBDT emoji too, which draw fine, and `fontformat` is just
 //! `TrueType`). Emoji then come from the next font that has them: a
 //! black-and-white one, or a CBDT color one. A browser the app starts for a
-//! link gets the user's own setting back ([`open_url`]).
+//! link gets the user's own setting back ([`users_config`], through
+//! [`crate::hostenv`]).
 
 use std::ffi::OsString;
 use std::io::{Read, Seek, SeekFrom};
@@ -79,34 +80,20 @@ pub fn avoid_colrv1() {
     }
 }
 
-/// Opens `url` as tauri-plugin-opener does (the same openers, in the same
-/// order: `xdg-open` first), but with the user's own `FONTCONFIG_FILE`, so
-/// a browser it starts shows every font. None when [`avoid_colrv1`] changed
-/// nothing: the plugin does it then.
-pub fn open_url(url: &str) -> Option<std::io::Result<()>> {
-    let users = USERS.get()?;
-    let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no program to open it");
-    for mut cmd in open::commands(url) {
-        match users {
-            Some(v) => cmd.env("FONTCONFIG_FILE", v),
-            None => cmd.env_remove("FONTCONFIG_FILE"),
-        };
-        let spawned = cmd
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        match spawned {
-            Ok(mut child) => {
-                // Reaped when it exits (xdg-open returns once the browser
-                // has the link, or runs as the browser's parent).
-                std::thread::spawn(move || child.wait());
-                return Some(Ok(()));
-            }
-            Err(e) => last = e,
+/// Gives `cmd` the user's own `FONTCONFIG_FILE` back (or none, if they
+/// had none), when [`avoid_colrv1`] changed it, so a browser the app starts
+/// shows every font. Called through [`crate::hostenv`], which gives such a
+/// program the rest of its environment back.
+pub(crate) fn users_config(cmd: &mut Command) {
+    match USERS.get() {
+        Some(Some(v)) => {
+            cmd.env("FONTCONFIG_FILE", v);
         }
+        Some(None) => {
+            cmd.env_remove("FONTCONFIG_FILE");
+        }
+        None => {}
     }
-    Some(Err(last))
 }
 
 /// Whether `file` is a config this module wrote: `ours` (also spelled

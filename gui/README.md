@@ -228,6 +228,18 @@ its desktop file, so without one:
   a CBDT color font, or a box where there is none. Other color fonts and every other font
   are untouched. A browser the app starts for a link gets your own setting back. The deb
   and rpm use the system's WebKitGTK and don't do this.
+- **The programs it starts get your own environment.** The AppImage runs with variables
+  that point inside its mount (`APPDIR`, `APPIMAGE`, `OWD`, `ARGV0`, and `PATH`,
+  `LD_LIBRARY_PATH`, `XDG_DATA_DIRS`, `GSETTINGS_SCHEMA_DIR`, `GIO_MODULE_DIR`, `GTK_PATH`,
+  `GDK_PIXBUF_MODULE_FILE`, `PYTHONPATH`, `PERLLIB`, `QT_PLUGIN_PATH`, `GST_PLUGIN_*` and
+  others with its own folders first), and `GTK_THEME` set to Adwaita. A browser or mail
+  client the app starts for a link would load the AppImage's libraries from a mount that
+  is gone once the app quits. So, for those programs, the variables the AppImage set are
+  dropped, its folders are taken out of every list that names one (a list left empty is
+  unset), and they run in the folder the AppImage was started from (else your home folder)
+  rather than inside the mount, so they start as from your desktop. The file manager (Show config file) and
+  notifications are reached over D-Bus and were never started with that environment. The
+  deb and rpm set none of it.
 
 To give it a menu entry and the window icon on Wayland, integrate it with
 [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) or

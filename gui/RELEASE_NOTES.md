@@ -16,6 +16,17 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
   Security → **Open Anyway**, after each update too; the cask's caveats say how.
   `brew uninstall --zap` also removes the app's own data, but not the settings and inboxes
   it shares with the command-line tool.
+- **AppImage: links open without the AppImage's environment.** A browser or mail client
+  the AppImage started for a link inherited `APPDIR`, `APPIMAGE`, `LD_LIBRARY_PATH`, `PATH`,
+  `XDG_DATA_DIRS` and other variables pointing inside the AppImage's mount (gone once the app
+  quits), so it could load the AppImage's libraries instead of its own. Those variables are
+  now dropped, and the AppImage's folders taken out of the others, for the browser or mail
+  client it starts for a link, which also starts in the folder the AppImage was started
+  from instead of inside its mount. Only the font setting was given back before.
+- **Inline images under one set of limits.** The app now resolves a mail's inline images
+  with the same code as the command-line tool's `read --html` (one fetch per attachment,
+  at most 64 names, 10 MiB per image and 25 MiB per message), from the shared core of
+  `tmpmail` 0.3.6. Nothing changes in what you see.
 
 ## What's new in 0.1.4
 

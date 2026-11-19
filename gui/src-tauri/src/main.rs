@@ -14,6 +14,8 @@ mod drag;
 mod fonts;
 #[cfg(target_os = "linux")]
 mod freedesktop;
+#[cfg(target_os = "linux")]
+mod hostenv;
 mod notify;
 mod scheme;
 mod settings;
@@ -278,14 +280,12 @@ fn app_page(url: &Url) -> bool {
     }
 }
 
-/// Mail links open as popups (`target="_blank"`). None is ever created: the
-/// link goes to the system browser or mail client, if its scheme is one we
-/// trust.
-/// Opens a web (or `mailto:`) address in the user's browser. The
-/// AppImage starts it with the user's own font config (`fonts::open_url`).
+/// Opens a web (or `mailto:`) address in the user's browser (or mail
+/// client). The AppImage starts it without the AppImage's own environment
+/// (`hostenv::open_url`).
 fn open_in_browser(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
-    if let Some(opened) = fonts::open_url(url) {
+    if let Some(opened) = hostenv::open_url(url) {
         return opened.map_err(|e| e.to_string());
     }
     app.opener()
@@ -293,6 +293,9 @@ fn open_in_browser(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Mail links open as popups (`target="_blank"`). None is ever created: the
+/// link goes to the system browser or mail client, if its scheme is one we
+/// trust.
 fn popup(app: &tauri::AppHandle, shared: &Shared, url: &Url) {
     #[cfg(debug_assertions)]
     if let Some(p) = &shared.probe {

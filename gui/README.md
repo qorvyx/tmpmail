@@ -27,9 +27,8 @@ a safe HTML preview in light or dark, and the TUI's actions and keys. Released o
 - **Messages:** unread dot (opening a message marks it read, saved in `state.json` so the
   CLI's `ls` and the TUI agree; the sidebar badge counts the rest), sender, subject, time and
   attachment icon; filter by sender or subject (`/`); delete (asks first) where the provider supports it.
-- **The open message:** (while it loads, if a provider is rate-limiting a request and the
-  app waits to try again, the pane says so: "mail.tm is limiting requests; trying again in
-  N s"; the app makes one request at a time, so another inbox's can hold a message back)
+- **The open message:** (while it loads, if a request to its provider waits out the
+  provider's rate limit, the pane says so: "mail.tm is limiting requests; retrying in N s")
   - The verification code, when `extract` finds one, in a banner at the top with a Copy
     button.
   - Links, the likeliest verification link first, each with Open (system browser, http and

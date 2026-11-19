@@ -1073,8 +1073,9 @@ impl App {
                 Ok(list.len())
             })?
         } else {
-            self.with_message(a.id.as_deref(), |p, inbox, id| {
-                p.delete_message(inbox, id).map(|()| 1)
+            self.with_inbox_at(n, |p, inbox| {
+                let id = Self::resolve_id(p, inbox, a.id.as_deref())?;
+                p.delete_message(inbox, &id).map(|()| 1)
             })?
         };
         if self.global.json {

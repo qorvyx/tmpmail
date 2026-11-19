@@ -400,14 +400,13 @@ pub async fn save_attachment(
     .map_err(|e| e.to_string())?
 }
 
-/// While a request waits out a provider's rate limit before trying again,
-/// that provider's name and the seconds until it tries (rounded up), so
-/// the page can say why a message takes long to open. Reads a note the
-/// core keeps; no request.
+/// While a request to `provider` waits out that provider's rate limit
+/// before trying again, the seconds until it tries (rounded up), so the
+/// page can say why a message of that provider takes long to open. Reads a
+/// note the core keeps; no request.
 #[tauri::command]
-pub async fn rate_limit() -> Option<Value> {
-    provider::rate_limit_wait()
-        .map(|(name, seconds)| json!({ "provider": name, "seconds": seconds }))
+pub async fn rate_limit(provider: String) -> Option<u64> {
+    provider::rate_limit_wait(&provider)
 }
 
 /// The window's own theme (Windows: its title bar) follows the app's

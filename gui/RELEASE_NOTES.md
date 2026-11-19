@@ -23,8 +23,8 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
   such numbers for codes.
 - **Plain-text mail keeps its indentation.** mail.tm and mail.gw send an HTML copy of a
   text-only mail that drops leading spaces; the app now shows such a mail as the text it is.
-- **A rate limit says so.** While a message opens and a provider is limiting requests, the
-  message pane says "mail.tm is limiting requests; trying again in N s" instead of showing
+- **A rate limit says so.** While a message opens and its provider is limiting requests,
+  the message pane says "mail.tm is limiting requests; retrying in N s" instead of showing
   only its placeholder.
 - **The Windows title bar follows the theme.** In the dark theme it stayed light; it now
   follows the System / Light / Dark switch.

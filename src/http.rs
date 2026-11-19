@@ -52,11 +52,15 @@ fn record_retry_after(provider: &'static str, wait: Option<Duration>) {
 /// provider and when the sleep ends.
 static SLEEPING: Mutex<Vec<(&'static str, std::time::Instant)>> = Mutex::new(Vec::new());
 
-/// The provider a request is sleeping out a rate limit for, and how long
-/// until it tries again (the longest such sleep), for a "trying again in
-/// N s" while a message loads. `None` when no request sleeps.
-pub(crate) fn rate_limit_sleep() -> Option<(&'static str, Duration)> {
-    sleeps().into_iter().max_by_key(|(_, d)| *d)
+/// How long a request to `provider` is still sleeping out a rate limit
+/// before trying again (the longest, if several are), for a "trying again
+/// in N s" while a message of that provider loads. `None` when none is.
+pub(crate) fn rate_limit_sleep(provider: &str) -> Option<Duration> {
+    sleeps()
+        .into_iter()
+        .filter(|(p, _)| *p == provider)
+        .map(|(_, d)| d)
+        .max()
 }
 
 /// Every request's rate-limit sleep: its provider and the time left.
@@ -462,7 +466,7 @@ mod tests {
         limited.assert();
         ok.assert();
         assert!(sleeps().iter().all(|(p, _)| *p != "sleep-test"));
-        assert!(rate_limit_sleep().is_none_or(|(p, _)| p != "sleep-test"));
+        assert_eq!(rate_limit_sleep("sleep-test"), None);
     }
 
     #[test]

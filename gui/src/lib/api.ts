@@ -81,6 +81,8 @@ export interface InboxView {
 export interface Summary {
   id: string;
   from: string;
+  /** The sender's display name (the core's `render::sender_name`). */
+  name: string;
   subject: string;
   intro: string;
   date: string | null;
@@ -113,6 +115,8 @@ export interface OpenedMessage {
   code: string | null;
   /** The sender's bare address (what "copy sender" copies). */
   sender: string;
+  /** The sender's display name (the core's `render::sender_name`). */
+  name: string;
   /** http(s) links, likely verification links first. */
   links: string[];
   /** Whether the message has an HTML body. */
@@ -172,8 +176,8 @@ export const api = {
   settings: () => invoke<SettingsView>("settings"),
   saveSettings: (input: SettingsInput) => invoke<void>("save_settings", { input }),
   revealConfig: () => invoke<void>("reveal_config"),
-  /** A provider rate-limiting a request, and the seconds until it tries again; or null. */
-  rateLimit: () => invoke<{ provider: string; seconds: number } | null>("rate_limit"),
+  /** Seconds until a request to `provider` tries again after its rate limit, or null. */
+  rateLimit: (provider: string) => invoke<number | null>("rate_limit", { provider }),
   /** The window's own theme (the Windows title bar) follows the app's switch. */
   setWindowTheme: (theme: "system" | "light" | "dark") =>
     invoke<"light" | "dark" | null>("set_window_theme", { theme }),
@@ -200,20 +204,6 @@ export function until(iso: string | null, now = Date.now()): string | null {
   if (secs < 3600) return `in ${Math.max(1, Math.floor(secs / 60))}m`;
   if (secs < 86400) return `in ${Math.floor(secs / 3600)}h`;
   return `in ${Math.floor(secs / 86400)}d`;
-}
-
-/// The display name of "Name <addr>", else the address: the same rules
-/// as the core's `render::sender_name` (the TUI, notifications). The
-/// address is the last <…>, so a name may have a "<" of its own. No regex:
-/// a sender's long runs of spaces can't make it slow.
-export function senderName(from: string): string {
-  const f = from.trim();
-  const open = f.lastIndexOf("<");
-  if (!f.endsWith(">") || open < 0) return f;
-  const address = f.slice(open + 1, -1);
-  if (!address.includes("@")) return f;
-  const name = f.slice(0, open).trim().replace(/^"+|"+$/g, "").trim();
-  return name || address.trim();
 }
 
 /// The avatar's letter: the first letter or digit of the sender's name,

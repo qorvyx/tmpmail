@@ -226,7 +226,7 @@ impl watcher::Front for Front {
                     }
                 }
                 self.arrivals.queue(arrived);
-                let list: Vec<Summary> = list.into_iter().map(shown).collect();
+                let list: Vec<Value> = list.into_iter().map(row).collect();
                 json!({ "address": address, "live": live, "messages": list })
             }
             Err(e) => json!({ "address": address, "live": live, "error": clean_line(&e) }),
@@ -469,6 +469,7 @@ impl Front {
                     "attachments": attachments,
                     "code": mail.code,
                     "sender": commands::sender_address(&msg.from),
+                    "name": crate::notify::sender_name(&msg.from),
                     "links": mail.links,
                     "html": msg.html.is_some(),
                 });
@@ -661,12 +662,23 @@ pub fn shown(mut s: Summary) -> Summary {
     s
 }
 
+/// A list row as sent to the page: [`shown`], and the sender's display
+/// name ([`crate::notify::sender_name`]: the core's rule, as in the TUI
+/// and notifications).
+pub fn row(s: Summary) -> Value {
+    let s = shown(s);
+    let name = crate::notify::sender_name(&s.from);
+    let mut v = json!(s);
+    v["name"] = json!(name);
+    v
+}
+
 /// The display name of an inbox's provider.
 fn provider_name(app: &App, address: &str) -> &'static str {
     app.state
         .position(address)
-        .and_then(|n| provider::get(&app.state.inboxes[n].provider).ok())
-        .map_or("the provider", |p| p.name())
+        .and_then(|n| provider::name(&app.state.inboxes[n].provider))
+        .unwrap_or("the provider")
 }
 
 /// The core's messages start lower case; notices are sentences.
@@ -715,5 +727,8 @@ mod tests {
         assert_eq!(row.subject, "RED desrever");
         assert_eq!(row.intro, "line one");
         assert_eq!(row.id, raw.id, "ids go back to the provider unchanged");
+        let sent = super::row(raw);
+        assert_eq!(sent["name"], "<b>Evil</b> & Co boN");
+        assert_eq!(sent["from"], "\"<b>Evil</b> & Co boN\" <evil@fldubai.com>");
     }
 }

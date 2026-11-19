@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, fileKind, fileSize, initial, senderName } from "./api";
+  import { api, fileKind, fileSize, initial } from "./api";
   import CodeBanner from "./CodeBanner.svelte";
   import Icon from "./Icon.svelte";
   import Preview from "./Preview.svelte";
@@ -7,26 +7,27 @@
   import { theme } from "./theme.svelte";
 
   const m = $derived(app.openedMessage);
-  const name = $derived(m ? senderName(m.from) : "");
+  const name = $derived(m?.name ?? "");
   const inbox = $derived(app.current);
   const caps = $derived(inbox ? app.provider(inbox.provider)?.caps : undefined);
   let allLinks = $state(false);
   let pane = $state<HTMLElement>();
   const links = $derived(m ? (allLinks ? m.links : m.links.slice(0, 1)) : []);
 
-  // While a message loads: whether a provider is rate-limiting a request
-  // and the worker waits to try again (asked once a second). The worker
-  // runs one request at a time, so that is what holds the message back.
-  let limited = $state<{ provider: string; seconds: number } | null>(null);
+  // While a message loads: whether a request to its provider waits out
+  // the provider's rate limit (asked once a second).
+  let retryIn = $state<number | null>(null);
   const loading = $derived(app.openId !== null && app.opened === null);
+  const provider = $derived(inbox?.provider);
   $effect(() => {
-    limited = null;
-    if (!loading) return;
+    const id = provider;
+    retryIn = null;
+    if (!loading || !id) return;
     let stop = false;
     const ask = () =>
-      api.rateLimit().then(
-        (r) => {
-          if (!stop) limited = r;
+      api.rateLimit(id).then(
+        (s) => {
+          if (!stop) retryIn = s;
         },
         () => {},
       );
@@ -262,9 +263,9 @@
         <div class="h-3 w-48 rounded bg-sunken"></div>
       </div>
       <div class="h-24 rounded-xl bg-sunken"></div>
-      {#if limited}
+      {#if retryIn !== null && provider}
         <p class="text-xs text-muted" role="status">
-          {limited.provider} is limiting requests; trying again in {limited.seconds} s.
+          {app.providerName(provider)} is limiting requests; retrying in {retryIn} s.
         </p>
       {/if}
     </div>

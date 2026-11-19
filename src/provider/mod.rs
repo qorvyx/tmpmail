@@ -25,36 +25,50 @@ pub const DEFAULT_ORDER: &[&str] = &["mailtm", "dropmail", "guerrilla", "tempmai
 type Constructor = fn() -> Box<dyn Provider>;
 
 /// Every provider, in the order `tmpmail providers` lists them.
-const REGISTRY: &[(&str, Constructor)] = &[
-    ("mailtm", || Box::new(mailtm::MailTm::tm())),
-    ("mailgw", || Box::new(mailtm::MailTm::gw())),
-    ("dropmail", || Box::new(dropmail::DropMail::new())),
-    ("guerrilla", || Box::new(guerrilla::Guerrilla::new())),
-    (
-        "tempmail_lol",
-        || Box::new(tempmail_lol::TempmailLol::new()),
-    ),
-    ("maildrop", || Box::new(maildrop::Maildrop::new())),
+/// Each provider's id, display name (the same as its `name()`, checked in
+/// a test) and constructor.
+const REGISTRY: &[(&str, &str, Constructor)] = &[
+    ("mailtm", "mail.tm", || Box::new(mailtm::MailTm::tm())),
+    ("mailgw", "mail.gw", || Box::new(mailtm::MailTm::gw())),
+    ("dropmail", "DropMail.me", || {
+        Box::new(dropmail::DropMail::new())
+    }),
+    ("guerrilla", "Guerrilla Mail", || {
+        Box::new(guerrilla::Guerrilla::new())
+    }),
+    ("tempmail_lol", "tempmail.lol", || {
+        Box::new(tempmail_lol::TempmailLol::new())
+    }),
+    ("maildrop", "Maildrop", || {
+        Box::new(maildrop::Maildrop::new())
+    }),
 ];
 
 pub fn all() -> impl Iterator<Item = &'static str> {
-    REGISTRY.iter().map(|(id, _)| *id)
+    REGISTRY.iter().map(|(id, _, _)| *id)
 }
 
-/// While a request waits out a provider's rate limit before trying again
-/// (the provider answered 429): that provider's name and the seconds until
-/// it tries, rounded up. The TUI and the desktop app run their requests
-/// one at a time, so this is why a message is slow to open. `None`
-/// otherwise.
-pub fn rate_limit_wait() -> Option<(&'static str, u64)> {
-    let (id, wait) = crate::http::rate_limit_sleep()?;
-    let name = get(id).map_or(id, |p| p.name());
-    Some((name, wait.as_secs() + u64::from(wait.subsec_nanos() > 0)))
+/// While a request to provider `id` waits out that provider's rate limit
+/// before trying again (it answered 429): the seconds until it tries,
+/// rounded up (the longest such wait). So a screen can say why a message
+/// of that provider is slow to open. `None` otherwise.
+pub fn rate_limit_wait(id: &str) -> Option<u64> {
+    let wait = crate::http::rate_limit_sleep(id)?;
+    Some(wait.as_secs() + u64::from(wait.subsec_nanos() > 0))
+}
+
+/// A provider's display name ("mail.tm") by its id, without making the
+/// provider; `None` for an unknown id.
+pub fn name(id: &str) -> Option<&'static str> {
+    REGISTRY
+        .iter()
+        .find(|(known, _, _)| *known == id)
+        .map(|(_, name, _)| *name)
 }
 
 pub fn get(id: &str) -> Result<Box<dyn Provider>> {
-    match REGISTRY.iter().find(|(known, _)| *known == id) {
-        Some((_, make)) => Ok(Box::new(Decoded(make()))),
+    match REGISTRY.iter().find(|(known, _, _)| *known == id) {
+        Some((_, _, make)) => Ok(Box::new(Decoded(make()))),
         None => Err(Error::Usage(format!(
             "unknown provider {id:?}, expected one of: {}",
             all().collect::<Vec<_>>().join(", ")
@@ -502,6 +516,14 @@ pub fn random_password() -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn registry_names_are_the_providers_own() {
+        for id in all() {
+            assert_eq!(name(id), Some(get(id).unwrap().name()), "{id}");
+        }
+        assert_eq!(name("nope"), None);
+    }
 
     #[test]
     fn parses_dates_in_all_provider_formats() {

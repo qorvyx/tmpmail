@@ -4,7 +4,6 @@ import { SvelteSet } from "svelte/reactivity";
 import {
   api,
   on,
-  senderName,
   type CreateArgs,
   type InboxView,
   type Init,
@@ -306,7 +305,7 @@ class AppState {
       const newest = unopened[0];
       if (newest) {
         const more = unopened.length > 1 ? ` and ${unopened.length - 1} more` : "";
-        const text = `${senderName(newest.from)}: ${newest.subject || "(no subject)"}${more}`;
+        const text = `${newest.name}: ${newest.subject || "(no subject)"}${more}`;
         const open = {
           label: "Open",
           run: () => {

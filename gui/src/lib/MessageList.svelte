@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ago, reveal, senderName, until } from "./api";
+  import { ago, reveal, until } from "./api";
   import Icon from "./Icon.svelte";
   import { app } from "./store.svelte";
 
@@ -131,7 +131,7 @@
             {/if}
             <span class="flex w-full items-baseline gap-2">
               <span class={["min-w-0 flex-1 truncate text-xs", !s.seen || fresh ? "font-bold" : "font-medium"]}>
-                {senderName(s.from)}
+                {s.name}
               </span>
               {#if fresh}
                 <span class="rounded bg-hi px-1.5 text-[10.5px] leading-4 font-bold text-hi-ink">New</span>

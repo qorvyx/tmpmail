@@ -41,15 +41,21 @@ tmpmail otp --wait --include-existing    # waits for the mail, then prints 48291
 ## Contents
 
 - 📦 **[Install](#install)**
+  <details><summary>Debian, Fedora, Arch, macOS, Windows</summary>
+
   - [Debian and Debian-based](#debian-and-debian-based)
   - [Fedora and RPM-based](#fedora-and-rpm-based)
   - [Arch and other Linux](#arch-and-other-linux)
   - [macOS](#macos)
   - [Windows](#windows)
   - [More options](#more-install-options)
+
+  </details>
 - 🚀 **[Quick start](#quick-start)**
 - 🖥️ **[Desktop app](#the-desktop-app)**
 - 📖 **[Guide](#guide)**
+  <details><summary>Addresses, reading, waiting, inboxes, scripts, AI agents</summary>
+
   - [Create an address](#create-an-address)
   - [Choose the username or the domain](#choose-the-username-or-the-domain)
   - [Choose the provider](#choose-the-provider)
@@ -62,11 +68,17 @@ tmpmail otp --wait --include-existing    # waits for the mail, then prints 48291
   - [Scripts and CI](#in-a-script-or-ci)
   - [AI agents](#with-an-ai-agent)
   - [Coming from the original tmpmail](#coming-from-the-original-tmpmail)
+
+  </details>
 - 📮 **[Providers](#providers)**
 - 📚 **[Reference](#reference)**
+  <details><summary>Commands, exit codes, configuration</summary>
+
   - [Commands](#commands)
   - [Exit codes](#exit-codes)
   - [Configuration and environment](#configuration)
+
+  </details>
 - ⚠️ **[When not to use tmpmail](#when-not-to-use-tmpmail)**
 - 🔒 **[Privacy and security](#privacy-and-security)**
 - 🤝 **[Contributing](#contributing)**

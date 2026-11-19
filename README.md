@@ -41,20 +41,32 @@ tmpmail otp --wait --include-existing    # waits for the mail, then prints 48291
 ## Contents
 
 - 📦 **[Install](#install)**
-  - [Debian, Ubuntu and Debian-based](#debian-ubuntu-and-debian-based) ·
-    [Fedora and RPM-based](#fedora-and-rpm-based) · [Arch and other Linux](#arch-and-other-linux) ·
-    [macOS](#macos) · [Windows](#windows) · [More options](#more-install-options)
+  - [Debian and Debian-based](#debian-and-debian-based)
+  - [Fedora and RPM-based](#fedora-and-rpm-based)
+  - [Arch and other Linux](#arch-and-other-linux)
+  - [macOS](#macos)
+  - [Windows](#windows)
+  - [More options](#more-install-options)
 - 🚀 **[Quick start](#quick-start)**
 - 🖥️ **[Desktop app](#the-desktop-app)**
 - 📖 **[Guide](#guide)**
-  - [Create an address](#create-an-address) · [Username or domain](#choose-the-username-or-the-domain) ·
-    [Provider](#choose-the-provider) · [Read mail](#read-your-mail) ·
-    [Wait for a code or link](#wait-for-a-code-or-link) · [Attachments](#attachments) ·
-    [Several inboxes](#several-inboxes) · [Log back in](#log-back-in) · [Clean up](#clean-up)
-  - [Scripts and CI](#in-a-script-or-ci) · [AI agents](#with-an-ai-agent) ·
-    [Coming from the original tmpmail](#coming-from-the-original-tmpmail)
+  - [Create an address](#create-an-address)
+  - [Choose the username or the domain](#choose-the-username-or-the-domain)
+  - [Choose the provider](#choose-the-provider)
+  - [Read your mail](#read-your-mail)
+  - [Wait for a code or link](#wait-for-a-code-or-link)
+  - [Attachments](#attachments)
+  - [Several inboxes](#several-inboxes)
+  - [Log back in](#log-back-in)
+  - [Clean up](#clean-up)
+  - [Scripts and CI](#in-a-script-or-ci)
+  - [AI agents](#with-an-ai-agent)
+  - [Coming from the original tmpmail](#coming-from-the-original-tmpmail)
 - 📮 **[Providers](#providers)**
-- 📚 **[Reference](#reference)**: commands, exit codes, configuration
+- 📚 **[Reference](#reference)**
+  - [Commands](#commands)
+  - [Exit codes](#exit-codes)
+  - [Configuration and environment](#configuration)
 - ⚠️ **[When not to use tmpmail](#when-not-to-use-tmpmail)**
 - 🔒 **[Privacy and security](#privacy-and-security)**
 - 🤝 **[Contributing](#contributing)**
@@ -68,13 +80,13 @@ tmpmail comes in two parts. They share the same inboxes and settings; install on
 | **Command-line tool** | `tmpmail` | the commands below, a full-screen view in the terminal (`tmpmail tui`) and the [AI agent server](#with-an-ai-agent) |
 | **Desktop app** | **tmpmail** in your apps menu (`tmpmail-gui` from a terminal with the `.deb` or `.rpm`; the AppImage runs from its own file) | a window with your mail, the code in a banner with a Copy button, notifications and a tray icon |
 
-Pick your system: [Debian, Ubuntu and Debian-based](#debian-ubuntu-and-debian-based) ·
+Pick your system: [Debian and Debian-based](#debian-and-debian-based) ·
 [Fedora and RPM-based](#fedora-and-rpm-based) ·
 [Arch and other Linux](#arch-and-other-linux) · [macOS](#macos) · [Windows](#windows).
 The desktop app's files are on its own
 **[release page (version 0.1.6)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.6)**.
 
-### Debian, Ubuntu and Debian-based
+### Debian and Debian-based
 
 For Debian and the systems built on it that use `apt`: Ubuntu, Linux Mint, Pop!_OS,
 elementary OS, Zorin OS and others. The desktop app needs Debian 12 or Ubuntu 22.04 or later
@@ -583,6 +595,7 @@ Every option is explained in [docs/usage.md](docs/usage.md), and the `--json` ou
 
 </details>
 
+<a id="exit-codes"></a>
 <details>
 <summary><b>Exit codes</b></summary>
 

@@ -182,22 +182,11 @@ fn format_addr(v: &Value) -> String {
     }
 }
 
-/// mail.tm (and mail.gw) rewrite an inline image's `cid:` URL in the HTML
-/// they return to `attachment:ID`, the id of the attachment they list for
-/// that part: `<img src="attachment:ATTACH000001">`. No browser or
-/// sanitizer knows that scheme, so the image showed as its alt text. Such
-/// an image source is put back as `cid:ID`, which
-/// [`super::inline_attachment`] matches by the attachment's id, under the
-/// inline images' usual limits: only a `src` attribute (`src=` right after
-/// a space, its value quoted or not) whose whole value is `attachment:`
-/// and the id of one of this message's own listed attachments that may be
-/// shown as an image ([`super::image_type`]). mail.tm writes these itself,
-/// always in that form; anything else (a link, the word in the text,
-/// another id) stays as it is.
 /// Whether `html` is only `text` in paragraphs and line breaks (what
 /// mail.tm and mail.gw make of a text-only mail): no other tag or
-/// attribute, and the same words, as far as both go (either may be cut at
-/// 100 KiB; the last word of the shorter one may be cut in two).
+/// attribute, and the same words. Where mail.tm cut a body at
+/// [`BODY_CAP`], the one cut may stop short of the other (its last word
+/// cut in two); a body that wasn't cut must have every word.
 fn is_text_copy(html: &str, text: &str) -> bool {
     let mut plain = String::new();
     let mut rest = html;
@@ -228,21 +217,35 @@ fn is_text_copy(html: &str, text: &str) -> bool {
         plain.split_whitespace().collect(),
         text.split_whitespace().collect(),
     );
-    let (short, long) = if h.len() <= t.len() {
-        (&h, &t)
-    } else {
-        (&t, &h)
-    };
-    let Some((_, whole)) = short.split_last() else {
+    if h.is_empty() {
         return false;
+    }
+    if h == t {
+        return true;
+    }
+    let cut = |body: &str| body.len() + 4 > BODY_CAP;
+    // Only a body mail.tm cut may stop short of the other.
+    let starts = |short: &[&str], long: &[&str]| {
+        short.split_last().is_some_and(|(last, whole)| {
+            long.starts_with(whole) && long.get(whole.len()).is_some_and(|w| w.starts_with(last))
+        })
     };
-    long.starts_with(whole)
-        && short
-            .last()
-            .zip(long.get(whole.len()))
-            .is_some_and(|(a, b)| b.starts_with(a))
+    (cut(html) && h.len() <= t.len() && starts(&h, &t))
+        || (cut(text) && t.len() <= h.len() && starts(&t, &h))
 }
 
+/// mail.tm (and mail.gw) rewrite an inline image's `cid:` URL in the HTML
+/// they return to `attachment:ID`, the id of the attachment they list for
+/// that part: `<img src="attachment:ATTACH000001">`. No browser or
+/// sanitizer knows that scheme, so the image showed as its alt text. Such
+/// an image source is put back as `cid:ID`, which
+/// [`super::inline_attachment`] matches by the attachment's id, under the
+/// inline images' usual limits: only a `src` attribute (`src=` right after
+/// a space, its value quoted or not) whose whole value is `attachment:`
+/// and the id of one of this message's own listed attachments that may be
+/// shown as an image ([`super::image_type`]). mail.tm writes these itself,
+/// always in that form; anything else (a link, the word in the text,
+/// another id) stays as it is.
 fn attachment_srcs_as_cids<'a>(html: &'a str, attachments: &[Attachment]) -> Cow<'a, str> {
     const SCHEME: &[u8] = b"attachment:";
     let images: Vec<&str> = attachments
@@ -647,7 +650,18 @@ mod tests {
 
         assert!(is_text_copy("<P>a &amp; b<BR>c<br />d</p>", "a & b\nc\nd"));
         // Cut at 100 KiB, the HTML mid-word.
-        assert!(is_text_copy("<p>one two thr", "one two three four"));
+        let words = "word ".repeat(BODY_CAP / 5);
+        let cut_html = format!("<p>{}wo", &words[..BODY_CAP - 5]);
+        assert!(is_text_copy(&cut_html, &format!("{words}tail")));
+        // The text cut in its last word, with as many words as the HTML.
+        let cut_text = format!("{}ta", &words[..BODY_CAP - 5]);
+        assert!(is_text_copy(
+            &format!("<p>{}tail", &words[..BODY_CAP - 5]),
+            &cut_text
+        ));
+        // Not cut: every word, so a fuller HTML part is the sender's.
+        assert!(!is_text_copy("<p>one two thr", "one two three four"));
+        assert!(!is_text_copy("<p>Hi,</p><p>Your code is 482913</p>", "Hi,"));
         for (html, text) in [
             // The sender's own HTML.
             ("<p>Hi <b>there</b></p>", "Hi there"),

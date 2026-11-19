@@ -60,7 +60,7 @@ full-screen view and the AI agent server) and the **desktop app**. Install one o
 | **Fedora** and other RPM systems | the [`.rpm` package](#deb-and-rpm-packages) | `brew install qorvyx/tap/tmpmail`, `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
 | **Other Linux** | `brew install qorvyx/tap/tmpmail` | `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
 | **macOS** | `brew install qorvyx/tap/tmpmail` | `cargo install --locked tmpmail`, or the `.tar.gz` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest) |
-| **Windows** | `cargo install --locked tmpmail` | the `.zip` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest): unzip it and put `tmpmail.exe` in a folder on your `PATH` |
+| **Windows** | the `.zip` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest): unzip it and put `tmpmail.exe` in a folder on your `PATH` ([how](#on-windows)) | `cargo install --locked tmpmail` (needs Rust and the Visual Studio C++ Build Tools) |
 
 With Homebrew, use the full name `qorvyx/tap/tmpmail`: Homebrew's own `tmpmail` is a
 different program. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can
@@ -104,12 +104,22 @@ on `PATH`), add that folder to `PATH` once: in bash, add
 `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` (zsh: `~/.zshrc`); in fish, run
 `fish_add_path ~/.local/bin`.
 
+#### On Windows
+
+Windows has no folder of your own on `PATH` at first. For example: create
+`%LOCALAPPDATA%\Programs\tmpmail`, put `tmpmail.exe` there, then add that folder to your
+user `Path` (Start → "Edit environment variables for your account" → Path → **Edit** →
+**New**), and open a new terminal. `cargo binstall tmpmail` also works, but cargo-binstall's
+own Windows program needs the Visual C++ Redistributable.
+
 #### Check a download
 
 Each release has a `SHA256SUMS` file, and every file has a GitHub build attestation that
 proves it was built from this repository. Download `SHA256SUMS` next to the file and run
-`sha256sum -c --ignore-missing SHA256SUMS`, or check the attestation (this needs the GitHub
-CLI 2.49 or later, logged in with `gh auth login` or `GH_TOKEN` set):
+`sha256sum -c --ignore-missing SHA256SUMS`. On Windows, `certutil -hashfile FILE SHA256` in
+a command prompt (or `Get-FileHash FILE` in PowerShell) prints the file's hash to compare
+with its line in `SHA256SUMS`. Or check the attestation (this needs the GitHub CLI 2.49 or
+later, logged in with `gh auth login` or `GH_TOKEN` set):
 
 ```sh
 gh attestation verify tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
@@ -126,6 +136,14 @@ tmpmail completions zsh  > ~/.zfunc/_tmpmail
 tmpmail completions fish > ~/.config/fish/completions/tmpmail.fish
 ```
 
+In PowerShell, write them to a file of their own and load it from your profile:
+
+```powershell
+tmpmail completions powershell | Out-File -Encoding utf8 $HOME\tmpmail-completions.ps1
+if (!(Test-Path $PROFILE)) { New-Item -Force $PROFILE }
+Add-Content $PROFILE '. $HOME\tmpmail-completions.ps1'
+```
+
 #### Upgrade and uninstall
 
 | Installed with | Upgrade | Uninstall |
@@ -134,10 +152,12 @@ tmpmail completions fish > ~/.config/fish/completions/tmpmail.fish
 | The `.deb` | `sudo apt install ./tmpmail-cli_NEW_amd64.deb` | `sudo apt remove tmpmail-cli` |
 | The `.rpm` | `sudo dnf install ./tmpmail-cli-NEW-1.x86_64.rpm` | `sudo dnf remove tmpmail-cli` |
 | cargo | `cargo install --locked tmpmail` | `cargo uninstall tmpmail` |
-| A download | download the new version the same way | delete the `tmpmail` file |
+| A download | download the new version the same way | delete the `tmpmail` file (`tmpmail.exe` on Windows, and its folder and `Path` entry if you made them for it) |
 
-Your inboxes and settings stay in `~/.local/state/tmpmail` and `~/.config/tmpmail`; delete
-those folders to remove everything.
+Your inboxes and settings stay in `~/.local/state/tmpmail` and `~/.config/tmpmail` on Linux,
+`~/Library/Application Support/tmpmail` on macOS, and `%LOCALAPPDATA%\tmpmail` and
+`%APPDATA%\tmpmail` on Windows; delete those folders to remove everything. (On Windows the
+desktop app installs into `%LOCALAPPDATA%\tmpmail` too: uninstall it first if you have it.)
 
 Optional helpers you probably have already: `copy` uses `wl-copy`, `xclip` or `xsel` on
 Linux (`pbcopy` on macOS, `clip.exe` on Windows); `read --html` opens your browser;
@@ -154,7 +174,7 @@ says how to get past the warning.
 
 | System | File | How to install |
 |---|---|---|
-| **Windows 10/11** | `tmpmail-desktop-VERSION-x64-setup.exe` | Run it. When Windows says "Windows protected your PC", click **More info**, then **Run anyway**. |
+| **Windows 10/11** | `tmpmail-desktop-VERSION-x64-setup.exe` | Download it in your browser. Edge may hold it as "isn't commonly downloaded": open the downloads list, click **⋯** next to the file, then **Keep**, **Show more**, **Keep anyway**. Run it. If Windows says "Windows protected your PC", click **More info**, then **Run anyway**. |
 | **macOS 10.15+** | `tmpmail-desktop-VERSION-universal.dmg`, or Homebrew (macOS 11+): `brew install --cask qorvyx/tap/tmpmail-desktop` | Open the DMG and drag tmpmail to Applications (Homebrew does this for you). Open tmpmail once (macOS refuses), then go to System Settings → Privacy & Security and click **Open Anyway**. |
 | **Debian, Ubuntu** | `tmpmail-desktop-VERSION-amd64.deb` | `sudo apt install ./tmpmail-desktop-VERSION-amd64.deb` |
 | **Fedora** and other RPM systems | `tmpmail-desktop-VERSION-x86_64.rpm` | `sudo dnf install ./tmpmail-desktop-VERSION-x86_64.rpm` |
@@ -449,7 +469,7 @@ Thanks to **mail.tm** for its free API; as its terms ask, this program links bac
 | `domains [-p PROVIDER]`, `providers [--check]` | Domains, and which services are up |
 | `tui` | Full-screen view, updated live |
 | `mcp` | MCP server for AI agents |
-| `completions bash\|zsh\|fish`, `man [-o DIR]` | Shell completions, man pages |
+| `completions bash\|zsh\|fish\|powershell`, `man [-o DIR]` | Shell completions, man pages |
 
 Every option is explained in [docs/usage.md](docs/usage.md), and the `--json` output in
 [docs/json.md](docs/json.md).

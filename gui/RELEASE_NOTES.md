@@ -7,6 +7,34 @@ and it shares the tool's inboxes and `config.toml`.
 It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS and on Windows. Please report
 what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 
+## What's new in 0.1.6
+
+- **Notification clicks bring the window to the front on Windows.** A click on a toast, or
+  on its entry in the notification center, restored the window and opened the message, but
+  left it behind the window in front. The app now takes the foreground (and if Windows still
+  refuses, puts the window above the others).
+- **The Save dialog starts in Downloads.** The first Save of an attachment opened in the
+  app's own folder (on Windows the install folder, which is also where the command-line
+  tool keeps its inboxes).
+  It now starts in your Downloads folder (or your home folder), and later in the folder you
+  last picked while the app runs.
+- **No false code on numbered mail.** A mail whose lines are numbered (`Line 00001 …`)
+  showed a code banner with `00001`; the shared detector of `tmpmail` 0.3.7 no longer takes
+  such numbers for codes.
+- **Plain-text mail keeps its indentation.** mail.tm and mail.gw send an HTML copy of a
+  text-only mail that drops leading spaces; the app now shows such a mail as the text it is.
+- **A rate limit says so.** While a message opens and a provider is limiting requests, the
+  message pane says "mail.tm is limiting requests; trying again in N s" instead of showing
+  only its placeholder.
+- **The Windows title bar follows the theme.** In the dark theme it stayed light; it now
+  follows the System / Light / Dark switch.
+- **Sender names that start with `<`.** A sender like `<b>Bank</b> <hello@…>` now shows
+  as `<b>Bank</b>` in the list, the header and notifications (the address no longer comes
+  with it), and its avatar is its first letter or digit (`B`), not `<`.
+- **`tmpmail-gui --version` and `--help`** print and exit without opening a window, also
+  without a display; started on Linux without a display, the app says so in one line
+  instead of crashing.
+
 ## What's new in 0.1.5
 
 - **Security: HTML sanitizer updated** to ammonia 4.2.5, which fixes a mutation XSS through
@@ -247,7 +275,9 @@ The app isn't signed with a paid certificate, so each system warns once.
   message about tmpmail, and enter your password. On macOS 15 (Sequoia) and later,
   Control-click → Open no longer skips this. If you trust the download, `xattr -dr
   com.apple.quarantine /Applications/tmpmail.app` does the same from a terminal.
-- **Windows:** SmartScreen says "Windows protected your PC": click **More info**, then
+- **Windows:** Edge may hold the download as "isn't commonly downloaded": open the
+  downloads list, click **⋯** next to the file, then **Keep**, **Show more**, **Keep
+  anyway**. If SmartScreen says "Windows protected your PC": click **More info**, then
   **Run anyway**. The installer installs for your user only, with no admin prompt, and
   fetches WebView2 if it's missing. If **Smart App Control** is on, it blocks the installer
   outright with no way past; it can only be turned off as a whole (Windows Security → App &

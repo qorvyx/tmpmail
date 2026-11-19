@@ -466,6 +466,16 @@ tmpmail completions zsh  > ~/.zfunc/_tmpmail
 tmpmail completions fish > ~/.config/fish/completions/tmpmail.fish
 ```
 
+PowerShell: write them to a file of their own and load it from your profile (appending them
+to the profile itself would put their `using` lines after its other lines, which PowerShell
+refuses):
+
+```powershell
+tmpmail completions powershell | Out-File -Encoding utf8 $HOME\tmpmail-completions.ps1
+if (!(Test-Path $PROFILE)) { New-Item -Force $PROFILE }
+Add-Content $PROFILE '. $HOME\tmpmail-completions.ps1'
+```
+
 The `.deb` and `.rpm` install them in the system folders (`/usr/share/bash-completion/completions/tmpmail`,
 `_tmpmail` in `/usr/share/zsh/vendor-completions` (deb) or `/usr/share/zsh/site-functions` (rpm), and
 `/usr/share/fish/vendor_completions.d/tmpmail.fish`), and Homebrew in its own.

@@ -1,14 +1,19 @@
 <p align="center"><img src="assets/logo.svg" alt="tmpmail logo" width="88" height="88"></p>
 
-# tmpmail
+<h1 align="center">tmpmail</h1>
 
-Disposable email from the terminal and a desktop app: make an address, get the verification code back.
+<p align="center">
+  <b>Disposable email in one command: make an address, get the verification code back.</b><br>
+  From the terminal, a full-screen terminal view (TUI) or a desktop app, on Linux, macOS and Windows.
+</p>
 
-[![CI](https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml/badge.svg)](https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml)
-[![Providers](https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml/badge.svg)](https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml)
-[![Latest release](https://img.shields.io/github/v/release/qorvyx/tmpmail)](https://github.com/qorvyx/tmpmail/releases/latest)
-[![crates.io](https://img.shields.io/crates/v/tmpmail)](https://crates.io/crates/tmpmail)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+<p align="center">
+  <a href="https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml"><img src="https://github.com/qorvyx/tmpmail/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml"><img src="https://github.com/qorvyx/tmpmail/actions/workflows/providers.yml/badge.svg" alt="Providers"></a>
+  <a href="https://github.com/qorvyx/tmpmail/releases/latest"><img src="https://img.shields.io/github/v/release/qorvyx/tmpmail" alt="Latest release"></a>
+  <a href="https://crates.io/crates/tmpmail"><img src="https://img.shields.io/crates/v/tmpmail" alt="crates.io"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later"></a>
+</p>
 
 ```sh
 addr=$(tmpmail new -q)                   # quickfox605@maxxspace.com
@@ -20,31 +25,39 @@ tmpmail otp --wait --include-existing    # waits for the mail, then prints 48291
 
 ## Highlights
 
-- **A code in one line.** `otp --wait` and `wait --link` block until the mail arrives and
-  print just the code or the link. Every command has `--json` and clear exit codes.
 - **Six free services, automatic fallback.** mail.tm, DropMail, Guerrilla Mail and
   [others](#providers); if one is down, tmpmail uses the next.
 - **Mail arrives live**, within about a second on mail.tm and DropMail.
-- **For people too:** a full-screen terminal view and a desktop app for Linux, macOS and
-  Windows, on the same inboxes.
+- **For scripts and CI:** a code in one line. `otp --wait` and `wait --link` block until the
+  mail arrives and print just the code or the link; every command has `--json` and clear exit
+  codes.
+- **For people:** a full-screen terminal view (TUI, `tmpmail tui`) and a desktop app for
+  Linux, macOS and Windows, on the same inboxes.
 - **For AI agents:** a built-in [MCP](https://modelcontextprotocol.io) server.
 - **Safe by default:** HTML mail is cleaned, remote images (trackers) are blocked, and
   hidden characters can't change your terminal.
 - **One small program** with nothing else to install, and verifiable builds.
 
-**Contents**
+## Contents
 
-- [Install](#install)
-- [Quick start](#quick-start)
-- [Desktop app](#the-desktop-app)
-- [Guide](#guide)
-- [Scripts and CI](#in-a-script-or-ci)
-- [AI agents](#with-an-ai-agent)
-- [Providers](#providers)
-- [Reference](#reference)
-- [When not to use tmpmail](#when-not-to-use-tmpmail)
-- [Privacy and security](#privacy-and-security)
-- [Contributing](#contributing)
+- 📦 **[Install](#install)**
+  - [Debian, Ubuntu and Debian-based](#debian-ubuntu-and-debian-based) ·
+    [Fedora and RPM-based](#fedora-and-rpm-based) · [Arch and other Linux](#arch-and-other-linux) ·
+    [macOS](#macos) · [Windows](#windows) · [More options](#more-install-options)
+- 🚀 **[Quick start](#quick-start)**
+- 🖥️ **[Desktop app](#the-desktop-app)**
+- 📖 **[Guide](#guide)**
+  - [Create an address](#create-an-address) · [Username or domain](#choose-the-username-or-the-domain) ·
+    [Provider](#choose-the-provider) · [Read mail](#read-your-mail) ·
+    [Wait for a code or link](#wait-for-a-code-or-link) · [Attachments](#attachments) ·
+    [Several inboxes](#several-inboxes) · [Log back in](#log-back-in) · [Clean up](#clean-up)
+  - [Scripts and CI](#in-a-script-or-ci) · [AI agents](#with-an-ai-agent) ·
+    [Coming from the original tmpmail](#coming-from-the-original-tmpmail)
+- 📮 **[Providers](#providers)**
+- 📚 **[Reference](#reference)**: commands, exit codes, configuration
+- ⚠️ **[When not to use tmpmail](#when-not-to-use-tmpmail)**
+- 🔒 **[Privacy and security](#privacy-and-security)**
+- 🤝 **[Contributing](#contributing)**
 
 ## Install
 
@@ -55,37 +68,46 @@ tmpmail comes in two parts. They share the same inboxes and settings; install on
 | **Command-line tool** | `tmpmail` | the commands below, a full-screen view in the terminal (`tmpmail tui`) and the [AI agent server](#with-an-ai-agent) |
 | **Desktop app** | **tmpmail** in your apps menu (`tmpmail-gui` from a terminal with the `.deb` or `.rpm`; the AppImage runs from its own file) | a window with your mail, the code in a banner with a Copy button, notifications and a tray icon |
 
-Pick your system: [Debian and Ubuntu](#debian-and-ubuntu) · [Fedora](#fedora) ·
+Pick your system: [Debian, Ubuntu and Debian-based](#debian-ubuntu-and-debian-based) ·
+[Fedora and RPM-based](#fedora-and-rpm-based) ·
 [Arch and other Linux](#arch-and-other-linux) · [macOS](#macos) · [Windows](#windows).
 The desktop app's files are on its own
 **[release page (version 0.1.6)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.6)**.
 
-### Debian and Ubuntu
+### Debian, Ubuntu and Debian-based
 
-Command-line tool:
+For Debian and the systems built on it that use `apt`: Ubuntu, Linux Mint, Pop!_OS,
+elementary OS, Zorin OS and others. The desktop app needs Debian 12 or Ubuntu 22.04 or later
+(or a system based on them).
+
+**Command-line tool:**
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-cli_0.3.7_amd64.deb
 sudo apt install ./tmpmail-cli_0.3.7_amd64.deb
 ```
 
-Desktop app:
+**Desktop app:**
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-amd64.deb
 sudo apt install ./tmpmail-desktop-0.1.6-amd64.deb
 ```
 
-### Fedora
+### Fedora and RPM-based
 
-Also for other systems that use `.rpm` packages. Command-line tool:
+For Fedora and the other systems that use `dnf`. The command-line tool also installs on
+RHEL, CentOS Stream, Rocky Linux and AlmaLinux; the desktop app needs version 9 or later of
+those, with [EPEL](https://docs.fedoraproject.org/en-US/epel/) turned on.
+
+**Command-line tool:**
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-cli-0.3.7-1.x86_64.rpm
 sudo dnf install ./tmpmail-cli-0.3.7-1.x86_64.rpm
 ```
 
-Desktop app:
+**Desktop app:**
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-x86_64.rpm
@@ -108,6 +130,8 @@ sudo dnf install ./tmpmail-desktop-0.1.6-x86_64.rpm
   (`man tmpmail`) and the bash, zsh and fish completions. It needs no other package;
   `xdg-utils` (to open mail and links in the browser) is recommended, so apt and dnf install
   it too, and `wl-clipboard` or `xclip` lets `tmpmail copy` use the clipboard.
+- **openSUSE:** the `.rpm` files install with
+  `sudo zypper install --allow-unsigned-rpm ./FILE.rpm`.
 - **Updates:** the packages don't update by themselves; install the next version's file the
   same way.
 
@@ -115,20 +139,28 @@ sudo dnf install ./tmpmail-desktop-0.1.6-x86_64.rpm
 
 ### Arch and other Linux
 
-Command-line tool, with Homebrew: `brew install qorvyx/tap/tmpmail`. Or download it (on ARM,
-use `aarch64` in place of `x86_64`):
+**Command-line tool**, either with [Homebrew](https://brew.sh):
 
 ```sh
-curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz
+brew install qorvyx/tap/tmpmail
+```
+
+or by downloading it (on ARM, use `aarch64` in place of `x86_64`):
+
+```sh
+curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz
 tar xzf tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz
 install -D -t ~/.local/bin tmpmail-0.3.7-x86_64-unknown-linux-musl/tmpmail
 ```
 
-If a new terminal then says `tmpmail: command not found`, add `~/.local/bin` to your `PATH`:
-in bash, add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` (zsh: `~/.zshrc`); in
-fish, run `fish_add_path ~/.local/bin`.
+If a new terminal then says `tmpmail: command not found`, add `~/.local/bin` to your `PATH`
+once (bash; for zsh use `~/.zshrc`, and in fish run `fish_add_path ~/.local/bin`):
 
-Desktop app: the AppImage, which runs on its own.
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
+**Desktop app:** the AppImage, which runs on its own.
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-x86_64.AppImage
@@ -179,12 +211,18 @@ macOS asks again after each update.
 
 ### Windows
 
-**Command-line tool:** download `tmpmail-0.3.7-x86_64-pc-windows-msvc.zip` from the
-[releases page](https://github.com/qorvyx/tmpmail/releases/latest) and unzip it. To run
-`tmpmail` from any terminal, put `tmpmail.exe` in a folder of its own, for example
-`%LOCALAPPDATA%\Programs\tmpmail`, then add that folder to your `Path`: Start → "Edit
-environment variables for your account" → **Path** → **Edit** → **New**. Open a new
-terminal.
+**Command-line tool:**
+
+1. Download
+   [`tmpmail-0.3.7-x86_64-pc-windows-msvc.zip`](https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-0.3.7-x86_64-pc-windows-msvc.zip)
+   and unzip it.
+2. Open File Explorer, paste `%LOCALAPPDATA%\Programs` into its address bar and press
+   Enter. Make a new folder there named `tmpmail`, and move `tmpmail.exe` into it.
+3. Add that folder to your `Path`: open Start, search for **Edit environment variables for
+   your account**, select **Path**, click **Edit**, then **New**, and paste
+   `%LOCALAPPDATA%\Programs\tmpmail`.
+   Click **OK** twice.
+4. Open a new terminal and run `tmpmail --version` to check.
 
 **Desktop app:** download
 [`tmpmail-desktop-0.1.6-x64-setup.exe`](https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-x64-setup.exe)

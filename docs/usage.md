@@ -441,6 +441,8 @@ tmpmail man | man -l -                     # read it now
 tmpmail man -o ~/.local/share/man/man1     # install tmpmail.1 and tmpmail-COMMAND.1
 ```
 
+The `.deb`, the `.rpm` and Homebrew install these pages already.
+
 | Option | Short | Explanation |
 |---|---|---|
 | `--output DIR` | `-o` | Write one page per command into this folder instead of printing the main page. If the folder can't be created or written, the error names it (exit 1). |
@@ -452,6 +454,10 @@ tmpmail completions bash > ~/.local/share/bash-completion/completions/tmpmail
 tmpmail completions zsh  > ~/.zfunc/_tmpmail
 tmpmail completions fish > ~/.config/fish/completions/tmpmail.fish
 ```
+
+The `.deb` and `.rpm` install them in the system folders (`/usr/share/bash-completion/completions/tmpmail`,
+`_tmpmail` in `/usr/share/zsh/vendor-completions` (deb) or `/usr/share/zsh/site-functions` (rpm), and
+`/usr/share/fish/vendor_completions.d/tmpmail.fish`), and Homebrew in its own.
 
 They complete commands and options, and the provider ids after `-p` (`new`, `domains`,
 `login`, which offers only the providers it can log in to). An unknown id after `-p` is

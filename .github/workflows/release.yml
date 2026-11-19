@@ -1,7 +1,7 @@
-# Builds release archives on a `v*` tag and publishes them as a GitHub
-# release with SHA256SUMS. Every file gets a build provenance attestation,
-# checked with `gh attestation verify FILE --repo qorvyx/tmpmail
-# --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml`.
+# Builds release archives, and .deb and .rpm packages for Linux, on a `v*`
+# tag and publishes them as a GitHub release with SHA256SUMS. Every file
+# gets a build provenance attestation, checked with `gh attestation verify
+# FILE --repo qorvyx/tmpmail --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml`.
 # Running it by hand (workflow_dispatch) only builds, as a dry run, even when
 # started on a tag: nothing is attested, published or pushed then.
 # `gui-v*` tags (the desktop app) don't match `v*`, so they don't run it.
@@ -46,7 +46,8 @@ jobs:
           fi
           echo "Tag $GITHUB_REF_NAME matches Cargo.toml"
       # The README names the released version (the attestation example, the
-      # install URL and its tar path, the library's `version = "X.Y"`).
+      # install URL and its tar path, the .deb and .rpm names, the library's
+      # `version = "X.Y"`).
       # Between releases it rightly still names the last one, so this only
       # runs on a tag, where every one of them must be the tag's version.
       - name: README names the tag's version
@@ -95,6 +96,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           [ "$GITHUB_REF_TYPE" = tag ] || version="dev"
           name="tmpmail-$version-$TARGET"
+          echo "ARCHIVE_DIR=$name" >> "$GITHUB_ENV"
           mkdir "$name"
           cp README.md LICENSE "$name/"
           if [[ "$TARGET" == *windows* ]]; then
@@ -105,12 +107,71 @@ jobs:
             tar czf "$name.tar.gz" "$name"
           fi
           ls -l tmpmail-*.*
+      # The .deb and .rpm (package `tmpmail-cli`; the desktop app's are
+      # `tmpmail`), from the binary the tarball above holds: nothing is
+      # compiled again. nfpm packs prebuilt files into both formats from one
+      # config (packaging/nfpm.yaml); it is a pinned release binary, checked
+      # against its checksum before it runs. Each runner runs its own binary
+      # here, for the man pages and completions.
+      - name: Linux packages
+        if: contains(matrix.target, 'linux')
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          NFPM_VERSION: 2.48.0
+        run: |
+          case "$(uname -m)" in
+            x86_64) nfpm_arch=x86_64 nfpm_sum=6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750 ;;
+            aarch64) nfpm_arch=arm64 nfpm_sum=a9a75213763783b7669719e505474c748c5ad7dc66591a195619deb50f85c2f4 ;;
+            *) echo "::error::no nfpm checksum for $(uname -m)"; exit 1 ;;
+          esac
+          tools="$RUNNER_TEMP/nfpm"
+          mkdir -p "$tools"
+          tgz="$tools/nfpm.tar.gz"
+          curl -fsSL --retry 3 -o "$tgz" \
+            "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_$nfpm_arch.tar.gz"
+          echo "$nfpm_sum  $tgz" | sha256sum -c -
+          tar xzf "$tgz" -C "$tools" nfpm
+          case "$TARGET" in
+            x86_64-*) deb_arch=amd64 rpm_arch=x86_64 ;;
+            aarch64-*) deb_arch=arm64 rpm_arch=aarch64 ;;
+            *) echo "::error::no package architecture for $TARGET"; exit 1 ;;
+          esac
+          # A dry run has no tag; a .deb version must start with a digit, so
+          # it takes Cargo.toml's.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[] | select(.name == "tmpmail") | .version')
+          fi
+          stage="$RUNNER_TEMP/stage"
+          mkdir -p "$stage/man" "$stage/completions"
+          cp "$ARCHIVE_DIR/tmpmail" "$ARCHIVE_DIR/README.md" "$ARCHIVE_DIR/LICENSE" "$stage/"
+          cp packaging/copyright "$stage/"
+          "$stage/tmpmail" man --output "$stage/man"
+          gzip -9n "$stage"/man/*.1
+          "$stage/tmpmail" completions bash > "$stage/completions/tmpmail"
+          "$stage/tmpmail" completions zsh > "$stage/completions/_tmpmail"
+          "$stage/tmpmail" completions fish > "$stage/completions/tmpmail.fish"
+          deb="$GITHUB_WORKSPACE/tmpmail-cli_${version}_$deb_arch.deb"
+          rpm="$GITHUB_WORKSPACE/tmpmail-cli-$version-1.$rpm_arch.rpm"
+          export PKG_VERSION="$version" PKG_ARCH="$deb_arch"
+          # The files' times inside the packages: the commit's.
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          cd "$stage"
+          "$tools/nfpm" pkg --config "$GITHUB_WORKSPACE/packaging/nfpm.yaml" --packager deb --target "$deb"
+          "$tools/nfpm" pkg --config "$GITHUB_WORKSPACE/packaging/nfpm.yaml" --packager rpm --target "$rpm"
+          ls -l "$deb" "$rpm"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.target }}
           path: |
             tmpmail-*.tar.gz
             tmpmail-*.zip
+            tmpmail-cli_*.deb
+            tmpmail-cli-*.rpm
           if-no-files-found: error
 
   release:
@@ -127,8 +188,8 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      # Exactly the five archives the build jobs make, nothing else, so
-      # nothing extra is attested or published.
+      # Exactly the five archives and four Linux packages the build jobs
+      # make, nothing else, so nothing extra is attested or published.
       - name: Check the archives
         shell: bash
         run: |
@@ -138,10 +199,14 @@ jobs:
             "tmpmail-$v-aarch64-unknown-linux-musl.tar.gz" \
             "tmpmail-$v-x86_64-apple-darwin.tar.gz" \
             "tmpmail-$v-x86_64-pc-windows-msvc.zip" \
-            "tmpmail-$v-x86_64-unknown-linux-musl.tar.gz")
+            "tmpmail-$v-x86_64-unknown-linux-musl.tar.gz" \
+            "tmpmail-cli_${v}_amd64.deb" \
+            "tmpmail-cli_${v}_arm64.deb" \
+            "tmpmail-cli-$v-1.x86_64.rpm" \
+            "tmpmail-cli-$v-1.aarch64.rpm")
           found=$(cd dist && ls -A | LC_ALL=C sort)
           if [ "$found" != "$(echo "$expected" | LC_ALL=C sort)" ]; then
-            echo "::error::dist/ holds other files than the five archives:"
+            echo "::error::dist/ holds other files than the five archives and four packages:"
             echo "$found"
             exit 1
           fi

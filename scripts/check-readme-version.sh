@@ -2,8 +2,9 @@
 # Usage: check-readme-version.sh VERSION [README]
 # Fails unless the release version README names is VERSION everywhere it
 # names one: the attestation example, the install URL and its tar path
-# (`tmpmail-VERSION-TARGET`, `/download/vVERSION/`), and the library's
-# `version = "MAJOR.MINOR"`. Run by release.yml on a `v*` tag.
+# (`tmpmail-VERSION-TARGET`, `/download/vVERSION/`), the .deb and .rpm
+# names (`tmpmail-cli_VERSION_amd64.deb`, `tmpmail-cli-VERSION-1.x86_64.rpm`),
+# and the library's `version = "MAJOR.MINOR"`. Run by release.yml on a `v*` tag.
 set -euo pipefail
 if [ $# -lt 1 ] || [ -z "$1" ]; then
   echo "usage: $0 VERSION [README]" >&2
@@ -23,19 +24,22 @@ need() {
 need "gh attestation verify tmpmail-$v-" "version $v in the attestation example"
 need "releases/download/v$v/tmpmail-$v-" "version $v in the install URL"
 need "tmpmail-$v-x86_64-unknown-linux-musl/tmpmail" "version $v in the install tar path"
+need "tmpmail-cli_${v}_amd64.deb" "version $v in the .deb name"
+need "tmpmail-cli-$v-1.x86_64.rpm" "version $v in the .rpm name"
 need "tmpmail = { version = \"$minor\"" "library version $minor"
 # Every version named in those forms, whole (a pre-release suffix included).
 while IFS= read -r hit; do
   line="${hit%%:*}"
   text="${hit#*:}"
   case "$text" in
-    "tmpmail = { version = \"$minor\"" | "/download/v$v/" | "tmpmail-$v-x86_64" | "tmpmail-$v-aarch64") ;;
+    "tmpmail = { version = \"$minor\"" | "/download/v$v/" | "tmpmail-$v-x86_64" | "tmpmail-$v-aarch64" | \
+      "tmpmail-cli_${v}_amd64" | "tmpmail-cli_${v}_arm64" | "tmpmail-cli-$v-1.x86_64" | "tmpmail-cli-$v-1.aarch64") ;;
     *)
       echo "::error file=$readme,line=$line::$readme names another version than $v: $text"
       fail=1
       ;;
   esac
-done < <(grep -noE 'tmpmail-[0-9][0-9A-Za-z.+-]*-(x86_64|aarch64)|/download/v[^/[:space:]]+/|tmpmail = \{ version = "[^"]*"' "$readme" || true)
+done < <(grep -noE 'tmpmail-[0-9][0-9A-Za-z.+-]*-(x86_64|aarch64)|tmpmail-cli_[0-9][0-9A-Za-z.+~-]*_(amd64|arm64)|tmpmail-cli-[0-9][0-9A-Za-z.+~-]*-1\.(x86_64|aarch64)|/download/v[^/[:space:]]+/|tmpmail = \{ version = "[^"]*"' "$readme" || true)
 if [ "$fail" = 0 ]; then
   echo "$readme names version $v in every release link and the library version"
 fi

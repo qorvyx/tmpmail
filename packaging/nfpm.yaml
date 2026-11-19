@@ -1,0 +1,134 @@
+# nfpm config for the command-line tool's .deb and .rpm (release.yml builds
+# them from the release binary). Package `tmpmail-cli`: the desktop app's
+# packages are `tmpmail`, so both install side by side.
+#
+# Run from a staging directory that holds tmpmail, README.md, LICENSE,
+# copyright (packaging/copyright),
+# man/*.1.gz and completions/{tmpmail,_tmpmail,tmpmail.fish}, with
+# PKG_VERSION (e.g. 0.3.6) and PKG_ARCH (amd64 or arm64) set:
+#
+#   nfpm pkg --config packaging/nfpm.yaml --packager deb --target OUT.deb
+name: tmpmail-cli
+arch: ${PKG_ARCH}
+platform: linux
+version: ${PKG_VERSION}
+release: 1
+section: mail
+priority: optional
+maintainer: qorvyx
+vendor: qorvyx
+homepage: https://github.com/qorvyx/tmpmail
+license: GPL-3.0-or-later
+description: |-
+  Disposable email from the terminal: make an address, get the code back
+  The tmpmail command-line tool, with its full-screen view and MCP server for
+  AI agents. It is one static program with nothing else to install. The
+  desktop app is the separate `tmpmail` package; both share the same inboxes.
+
+# Static binary: no runtime dependencies. xdg-utils opens HTML mail and links
+# in the browser; wl-clipboard or xclip back `tmpmail copy`.
+recommends:
+  - xdg-utils
+overrides:
+  deb:
+    suggests:
+      - wl-clipboard | xclip
+  rpm:
+    suggests:
+      - (wl-clipboard or xclip)
+
+contents:
+  - src: ./tmpmail
+    dst: /usr/bin/tmpmail
+    file_info:
+      mode: 0755
+  - src: ./man/*.1.gz
+    dst: /usr/share/man/man1/
+    file_info:
+      mode: 0644
+  - src: ./completions/tmpmail
+    dst: /usr/share/bash-completion/completions/tmpmail
+    file_info:
+      mode: 0644
+  # Debian's zsh reads vendor completions from vendor-completions; Fedora's
+  # (and most others') from site-functions.
+  - src: ./completions/_tmpmail
+    dst: /usr/share/zsh/vendor-completions/_tmpmail
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ./completions/_tmpmail
+    dst: /usr/share/zsh/site-functions/_tmpmail
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: ./completions/tmpmail.fish
+    dst: /usr/share/fish/vendor_completions.d/tmpmail.fish
+    file_info:
+      mode: 0644
+  # deb: the docs, with the license in Debian's copyright format too.
+  - src: ./README.md
+    dst: /usr/share/doc/tmpmail-cli/README.md
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ./LICENSE
+    dst: /usr/share/doc/tmpmail-cli/LICENSE
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ./copyright
+    dst: /usr/share/doc/tmpmail-cli/copyright
+    packager: deb
+    file_info:
+      mode: 0644
+  # rpm: the same docs, marked %doc and %license (nfpm leaves these types out
+  # of the deb).
+  - src: ./README.md
+    dst: /usr/share/doc/tmpmail-cli/README.md
+    type: doc
+    file_info:
+      mode: 0644
+  - src: ./LICENSE
+    dst: /usr/share/doc/tmpmail-cli/LICENSE
+    type: license
+    file_info:
+      mode: 0644
+  # rpm removes only the directories a package owns (dpkg removes empty
+  # ones), so it co-owns the completion folders, which exist only when the
+  # shell or bash-completion is installed.
+  - dst: /usr/share/doc/tmpmail-cli
+    type: dir
+    packager: rpm
+    file_info:
+      mode: 0755
+  - dst: /usr/share/bash-completion
+    type: dir
+    packager: rpm
+    file_info:
+      mode: 0755
+  - dst: /usr/share/bash-completion/completions
+    type: dir
+    packager: rpm
+    file_info:
+      mode: 0755
+  - dst: /usr/share/zsh
+    type: dir
+    packager: rpm
+    file_info:
+      mode: 0755
+  - dst: /usr/share/zsh/site-functions
+    type: dir
+    packager: rpm
+    file_info:
+      mode: 0755
+  - dst: /usr/share/fish
+    type: dir
+    packager: rpm
+    file_info:
+      mode: 0755
+  - dst: /usr/share/fish/vendor_completions.d
+    type: dir
+    packager: rpm
+    file_info:
+      mode: 0755

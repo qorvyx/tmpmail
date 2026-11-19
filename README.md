@@ -56,13 +56,35 @@ full-screen view and the AI agent server) and the **desktop app**. Install one o
 
 | System | Recommended | Other ways |
 |---|---|---|
-| **Linux** | `brew install qorvyx/tap/tmpmail` | `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
+| **Debian, Ubuntu** | the [`.deb` package](#deb-and-rpm-packages) | `brew install qorvyx/tap/tmpmail`, `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
+| **Fedora** and other RPM systems | the [`.rpm` package](#deb-and-rpm-packages) | `brew install qorvyx/tap/tmpmail`, `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
+| **Other Linux** | `brew install qorvyx/tap/tmpmail` | `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
 | **macOS** | `brew install qorvyx/tap/tmpmail` | `cargo install --locked tmpmail`, or the `.tar.gz` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest) |
 | **Windows** | `cargo install --locked tmpmail` | the `.zip` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest): unzip it and put `tmpmail.exe` in a folder on your `PATH` |
 
 With Homebrew, use the full name `qorvyx/tap/tmpmail`: Homebrew's own `tmpmail` is a
 different program. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can
 run `cargo binstall tmpmail` to get the ready-made program instead of compiling it.
+
+#### .deb and .rpm packages
+
+Each release from 0.3.6 on has them. For x86_64; on ARM, use `arm64` in place of `amd64`
+(deb) or `aarch64` in place of `x86_64` (rpm).
+
+```sh
+# Debian, Ubuntu and others with apt
+curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/tmpmail-cli_0.3.6_amd64.deb
+sudo apt install ./tmpmail-cli_0.3.6_amd64.deb
+
+# Fedora and others with dnf
+curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/tmpmail-cli-0.3.6-1.x86_64.rpm
+sudo dnf install ./tmpmail-cli-0.3.6-1.x86_64.rpm
+```
+
+The package is named `tmpmail-cli` (the desktop app's is `tmpmail`), so both install side by
+side. It puts `tmpmail` in `/usr/bin` with its man pages (`man tmpmail`) and the bash, zsh
+and fish completions, and needs nothing else. It doesn't update by itself: install the next
+version's file the same way.
 
 #### Download on Linux
 
@@ -86,6 +108,8 @@ gh attestation verify tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz --repo qorv
 
 #### Shell completions (optional)
 
+Homebrew and the `.deb` and `.rpm` install them already. For the other ways:
+
 ```sh
 tmpmail completions bash > ~/.local/share/bash-completion/completions/tmpmail
 tmpmail completions zsh  > ~/.zfunc/_tmpmail
@@ -97,6 +121,8 @@ tmpmail completions fish > ~/.config/fish/completions/tmpmail.fish
 | Installed with | Upgrade | Uninstall |
 |---|---|---|
 | Homebrew | `brew upgrade qorvyx/tap/tmpmail` | `brew uninstall qorvyx/tap/tmpmail` |
+| The `.deb` | `sudo apt install ./tmpmail-cli_NEW_amd64.deb` | `sudo apt remove tmpmail-cli` |
+| The `.rpm` | `sudo dnf install ./tmpmail-cli-NEW-1.x86_64.rpm` | `sudo dnf remove tmpmail-cli` |
 | cargo | `cargo install --locked tmpmail` | `cargo uninstall tmpmail` |
 | A download | download the new version the same way | delete the `tmpmail` file |
 

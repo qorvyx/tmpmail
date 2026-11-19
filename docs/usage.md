@@ -170,7 +170,9 @@ config or `TMPMAIL_PUSH=0`.
 ### `otp`: extract a verification code
 
 Finds the most likely one-time code (e.g. `482913`, `123-456`, `A7K2QX`) in a message.
-Years, prices, phone numbers and order numbers are ignored. With `--json` it also lists
+Years, prices, phone numbers and order numbers are ignored, and so are numbered lines,
+pages and other counters (`Line 00001`, `page 12`) with no code word near. The TUI, the MCP
+server and the desktop app's message view use the same detector. With `--json` it also lists
 the other candidates with their scores.
 
 | Option | Short | Explanation |

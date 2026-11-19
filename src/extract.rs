@@ -20,6 +20,17 @@ static KEYWORD: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// A word that numbers things right before a number on the same line:
+/// "Line 00001", "page 12", "Order #5521", "No. 5521". Without a code word
+/// near, that number is a counter or a reference, not a code. The match
+/// must start a word in the whole text (checked by the caller).
+static COUNTER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)(?:(?:line|page|row|chapter|section|order|invoice|ticket|ref|room)[ \t]*#?|(?:no|nr)\.?[ \t]*#?|#)[ \t]*$",
+    )
+    .unwrap()
+});
+
 /// Numeric codes (optionally split as `123 456` / `123-456`) and mixed
 /// upper-case alphanumeric codes such as `A7K2QX`.
 static CODE: LazyLock<Regex> =
@@ -29,6 +40,9 @@ static CODE: LazyLock<Regex> =
 pub fn otp_candidates(subject: &str, body: &str) -> Vec<Candidate> {
     let mut out: Vec<Candidate> = Vec::new();
     let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    // A code word in the subject speaks for the body's numbers too, as far
+    // as the counter checks go.
+    let subject_keyed = KEYWORD.is_match(head(subject, MAX_SCAN));
     for (text, bonus) in [(subject, 3), (body, 0)] {
         let text = head(text, MAX_SCAN);
         for m in CODE.find_iter(text) {
@@ -47,14 +61,34 @@ pub fn otp_candidates(subject: &str, body: &str) -> Vec<Candidate> {
             let before = window_before(text, m.start(), 80);
             let after = window_after(text, m.end(), 30);
 
+            let close = KEYWORD.is_match(window_before(text, m.start(), 25));
             if KEYWORD.is_match(before) {
                 score += 10;
                 // Closer keywords count more ("code: 123456").
-                if KEYWORD.is_match(window_before(text, m.start(), 25)) {
+                if close {
                     score += 4;
                 }
             } else if KEYWORD.is_match(after) {
                 score += 6; // "123456 is your code"
+            }
+            // "Line 00001 of …", "order no. 552190": a counter or a
+            // reference, also in a sentence with a code word ("the code
+            // for order no. 552190 is …"). A number with no code word near
+            // is let off when the subject has one.
+            let keyed_here = KEYWORD.is_match(before) || KEYWORD.is_match(after);
+            if letters == 0 && (keyed_here || !subject_keyed) && counted(text, m.start()) {
+                score -= 5;
+            }
+            // A short zero-padded number ("00001") with no code word near
+            // at all: more likely a counter or an id.
+            if letters == 0
+                && code.len() <= 5
+                && code.starts_with("000")
+                && !raw.contains([' ', '-'])
+                && !subject_keyed
+                && !keyed_here
+            {
+                score -= 2;
             }
             if letters == 0 {
                 score += match code.len() {
@@ -107,6 +141,19 @@ pub fn otp_candidates(subject: &str, body: &str) -> Vec<Candidate> {
     out.retain(|c| c.score > 0);
     out.sort_by_key(|c| std::cmp::Reverse(c.score));
     out
+}
+
+/// Whether a counting word ([`COUNTER`]) comes right before `at`, as a
+/// word of its own in `text` (not the end of a longer one).
+fn counted(text: &str, at: usize) -> bool {
+    let window = window_before(text, at, 24);
+    COUNTER.find(window).is_some_and(|c| {
+        let start = at - window.len() + c.start();
+        text[..start]
+            .chars()
+            .next_back()
+            .is_none_or(|ch| !ch.is_alphanumeric())
+    })
 }
 
 /// The most likely verification code, if any. `custom` overrides the
@@ -419,6 +466,46 @@ mod tests {
         assert_eq!(
             best("", "Votre code de vérification est 550123"),
             Some("550123".into())
+        );
+    }
+
+    #[test]
+    fn line_counters_are_not_codes() {
+        // Round 3's long mail: no code in it, every line numbered.
+        let body: String = (1..=2200)
+            .map(|i| {
+                format!(
+                    "Line {i:05} of the long mail. Lorem ipsum dolor sit amet, \
+                     consectetur adipiscing elit.\n"
+                )
+            })
+            .chain(["LAST LINE: https://example.com/the-end\n".to_string()])
+            .collect();
+        assert_eq!(best("Very long mail", &body), None);
+        assert_eq!(best("", "See page 4417 and order no. 552190."), None);
+        assert_eq!(
+            best("", "Your security code for order no. 552190 is 482913"),
+            Some("482913".into())
+        );
+        // A counting word on the line before, or ending a longer word,
+        // or a code word only in the subject: still a code.
+        assert_eq!(
+            best("Your verification code", "Thanks for your order.\n\n482913"),
+            Some("482913".into())
+        );
+        assert_eq!(best("", "Wiederverkaufspart 482913"), Some("482913".into()));
+        assert_eq!(best("Sign in", "Line 1: 482913"), Some("482913".into()));
+        assert_eq!(best("", "One last step: 482913"), Some("482913".into()));
+        assert_eq!(best("Ticket 00042", "Reply above this line."), None);
+        // With a code word near, the same shapes are codes.
+        assert_eq!(
+            best("", "Line 2: your code is 004417"),
+            Some("004417".into())
+        );
+        assert_eq!(best("Your login code", "000123"), Some("000123".into()));
+        assert_eq!(
+            best("", &format!("{body}Your verification code is 731904.")),
+            Some("731904".into())
         );
     }
 

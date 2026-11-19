@@ -109,12 +109,11 @@ enum Ev {
         address: String,
         id: String,
     },
-    /// A message to open in the browser (`o`), with its inline images'
-    /// `data:` URLs by cid, and how many cids it names (up to the limit).
+    /// A message to open in the browser (`o`), with its inline images
+    /// resolved.
     Inline {
         msg: Box<Message>,
-        images: HashMap<String, String>,
-        named: usize,
+        images: Box<crate::provider::InlineImages>,
     },
     Fatal(String),
 }
@@ -127,6 +126,13 @@ fn worker(global: Global, rx: Receiver<Req>, tx: Sender<Ev>, log: Sender<String>
     Ok(())
 }
 
+/// The note for the inline images a copy couldn't show: `shown` of the
+/// `named` ones the message names (up to the limit).
+fn missing_images(named: usize, shown: usize) -> Option<String> {
+    let missing = named.saturating_sub(shown);
+    (missing > 0).then(|| format!("{missing} of its {named} inline images couldn't be loaded"))
+}
+
 /// Fetches the inline (`cid:`) images of the messages `o` opens, as
 /// `read --html` does (same images, limits and fallbacks), with an `App`
 /// loaded for each, so it has the inboxes as they are now.
@@ -137,11 +143,6 @@ fn inline_worker(
     log: Sender<String>,
 ) {
     for (address, msg) in rx {
-        let named = msg.html.as_deref().map_or(0, |h| {
-            crate::render::cid_images(h)
-                .len()
-                .min(crate::provider::MAX_INLINE_CIDS)
-        });
         let images = App::new(global.clone())
             .ok()
             .and_then(|mut app| {
@@ -150,7 +151,13 @@ fn inline_worker(
                 Some(app.inline_images(n, &msg))
             })
             .unwrap_or_default();
-        if tx.send(Ev::Inline { msg, images, named }).is_err() {
+        if tx
+            .send(Ev::Inline {
+                msg,
+                images: Box::new(images),
+            })
+            .is_err()
+        {
             return;
         }
     }
@@ -390,9 +397,9 @@ impl Ui {
             for ev in events.try_iter() {
                 match ev {
                     Ev::Fatal(e) => return Err(anyhow::anyhow!(e).into()),
-                    Ev::Inline { msg, images, named } => {
+                    Ev::Inline { msg, images } => {
                         self.inline_busy = false;
-                        self.open_html(app, &msg, &images, named);
+                        self.open_html(app, &msg, *images);
                     }
                     ev => self.event(ev),
                 }
@@ -789,7 +796,7 @@ impl Ui {
                                 self.say("loading the message's inline images...");
                             }
                         }
-                        _ => self.open_html(app, &msg, &HashMap::new(), 0),
+                        _ => self.open_html(app, &msg, crate::provider::InlineImages::new()),
                     }
                 }
             }
@@ -810,20 +817,20 @@ impl Ui {
         }
     }
 
-    /// Opens `msg` in the browser with its inline `images` (of the `named`
-    /// cids it names), and says how.
-    fn open_html(
-        &mut self,
-        app: &App,
-        msg: &Message,
-        images: &HashMap<String, String>,
-        named: usize,
-    ) {
-        let missing = named.saturating_sub(images.len());
-        let missing = (missing > 0)
-            .then(|| format!("{missing} of its {named} inline images couldn't be loaded"));
+    /// Opens `msg` in the browser with its inline `images` (resolved for
+    /// the cids it names), and says how.
+    fn open_html(&mut self, app: &App, msg: &Message, images: crate::provider::InlineImages) {
+        // None looked up (the inboxes couldn't be loaded): all are missing.
+        let named = match images.named() {
+            0 => msg.html.as_deref().map_or(0, |h| {
+                crate::render::cid_images(h)
+                    .len()
+                    .min(crate::provider::MAX_INLINE_CIDS)
+            }),
+            n => n,
+        };
         match app.open_html(msg, false, images) {
-            Ok(view) => match [view.note, missing]
+            Ok((view, shown)) => match [view.note, missing_images(named, shown)]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()

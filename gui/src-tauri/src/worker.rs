@@ -13,12 +13,12 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, UriSchemeResponder};
 use tmpmail::app::{App, Global};
 use tmpmail::config::Config;
-use tmpmail::provider::{self, CreateOpts, Message, Summary};
+use tmpmail::provider::{self, CreateOpts, InlineImages, InlineLookup, InlineStep, Summary};
 use tmpmail::render::clean_line;
 use tmpmail::watcher::{self, CreateField, Watcher};
 
 use crate::notify::{self, Arrivals};
-use crate::{InlineImage, Mails, Shared};
+use crate::{Mails, Shared};
 use crate::{commands, scheme, tray};
 
 pub enum Req {
@@ -492,146 +492,83 @@ impl Front {
     /// Serves an inline image, fetching it from the provider the first
     /// time and keeping it with the message after that, by the part it is
     /// (so other `cid:` names for the same part are served from that copy).
-    /// The image is the attachment the provider lists under the cid's name;
-    /// else (mail.tm lists it by file name only, or the download failed)
-    /// the part with that `Content-ID` in the raw source, where the provider
-    /// has one. The source is read once for all the message's images. The
-    /// message's limits ([`Mail::inline_image`]) hold throughout.
+    /// The core's resolver ([`provider::InlineImages`], the CLI's too) says
+    /// what to fetch: the attachment the provider lists under the cid's
+    /// name, else (mail.tm lists it by file name only, or the download
+    /// failed) the raw source, where the provider has one, read once for all
+    /// the message's images and kept for the Source view. Fetches run
+    /// without the lock; the message's limits hold throughout.
     fn inline(&self, app: &mut App, key: u64, cid: String, responder: UriSchemeResponder) {
         let found = {
             let mut mails = self.shared.mails.lock().expect("mails lock");
             mails
                 .get_mut(key)
-                .map(|m| (m.inline_image(&cid), m.address.clone(), m.msg.clone()))
+                .map(|m| (m.inline.serve(&cid), m.address.clone(), m.msg.clone()))
         };
         let (address, msg) = match found {
             None => return responder.respond(scheme::not_found()),
             // Resolved while this request was queued, or past the limits.
-            Some((InlineImage::Image(mime, bytes), ..)) => {
-                return responder.respond(scheme::image(&mime, bytes));
+            Some((InlineLookup::Image(mime, bytes), ..)) => {
+                return responder.respond(scheme::image(&mime, Arc::unwrap_or_clone(bytes)));
             }
-            Some((InlineImage::Missing, ..)) => return responder.respond(scheme::not_found()),
-            Some((InlineImage::Unknown, address, msg)) => (address, msg),
+            Some((InlineLookup::Missing, ..)) => return responder.respond(scheme::not_found()),
+            Some((InlineLookup::Unknown, address, msg)) => (address, msg),
         };
-        let mut part = None;
-        if let Some((att, mime)) = provider::inline_attachment(&msg, &cid)
-            && let Some(i) = msg.attachments.iter().position(|a| std::ptr::eq(a, att))
-        {
-            let listed = format!("attachment {i}");
-            let have = {
-                let mails = self.shared.mails.lock().expect("mails lock");
-                mails.get(key).map(|m| {
-                    (
-                        m.inline.contains_key(&listed),
-                        m.inline_failed.contains(&listed) || m.inline_unreachable.contains(&listed),
-                        m.inline_kept(),
-                    )
-                })
+        let n = app.state.position(&address);
+        // Each fetch settles one attachment or the source, so a name takes
+        // at most two before it is resolved.
+        for _ in 0..3 {
+            let step = {
+                let mut mails = self.shared.mails.lock().expect("mails lock");
+                match mails.get_mut(key) {
+                    None => return responder.respond(scheme::not_found()),
+                    Some(m) => m.inline.resolve(&msg, &cid),
+                }
             };
-            let too_big = |len: usize, kept: usize| {
-                len > provider::MAX_INLINE_IMAGE || kept + len > provider::MAX_INLINE_TOTAL
-            };
-            match have {
-                None => return responder.respond(scheme::not_found()),
-                Some((true, ..)) => part = Some(listed),
-                Some((false, true, _)) => {}
-                Some((false, false, kept)) => {
-                    // Not fetched when the listing already says it won't fit.
-                    let listed_size = att.size.and_then(|s| usize::try_from(s).ok());
-                    // `None` when too big by the listing, `Some(None)` when
-                    // the download failed.
-                    let fetched = if listed_size.is_some_and(|len| too_big(len, kept)) {
-                        None
-                    } else {
-                        Some(app.state.position(&address).and_then(|n| {
-                            app.with_inbox_at(n, |p, inbox| p.attachment(inbox, &msg, att))
-                                .ok()
-                        }))
-                    };
+            match step {
+                InlineStep::Done => break,
+                InlineStep::FetchAttachment(i) => {
+                    let bytes = n.and_then(|n| {
+                        app.with_inbox_at(n, |p, inbox| {
+                            p.attachment(inbox, &msg, &msg.attachments[i])
+                        })
+                        .ok()
+                    });
                     let mut mails = self.shared.mails.lock().expect("mails lock");
                     if let Some(m) = mails.get_mut(key) {
-                        match fetched {
-                            Some(Some(bytes)) if !too_big(bytes.len(), m.inline_kept()) => {
-                                m.inline.insert(listed.clone(), (mime, bytes));
-                                part = Some(listed);
-                            }
-                            Some(None) => {
-                                m.inline_unreachable.insert(listed);
-                            }
-                            _ => {
-                                m.inline_failed.insert(listed);
-                            }
+                        m.inline.attachment_fetched(&msg, i, bytes);
+                    }
+                }
+                InlineStep::FetchSource => {
+                    let raw = n.and_then(|n| {
+                        let id = app.state.inboxes[n].provider.clone();
+                        if !provider::get(&id).is_ok_and(|p| p.caps().raw) {
+                            return None;
+                        }
+                        app.with_inbox_at(n, |p, inbox| p.raw(inbox, &msg.id)).ok()
+                    });
+                    // Decoded without the lock: the scheme waits on it.
+                    let images = InlineImages::read_source(&msg, raw.as_deref());
+                    let text = raw.map(|raw| Arc::new(String::from_utf8_lossy(&raw).into_owned()));
+                    let mut mails = self.shared.mails.lock().expect("mails lock");
+                    if let Some(m) = mails.get_mut(key) {
+                        m.inline.add_source(images);
+                        if m.source.is_none() {
+                            m.source = text;
                         }
                     }
                 }
             }
         }
-        if part.is_none() {
-            self.source_images(app, key, &address, &msg);
-            let source_part = format!("cid {cid}");
-            let mails = self.shared.mails.lock().expect("mails lock");
-            if mails
-                .get(key)
-                .is_some_and(|m| m.inline.contains_key(&source_part))
-            {
-                part = Some(source_part);
-            }
-        }
         let image = {
             let mut mails = self.shared.mails.lock().expect("mails lock");
-            mails.get_mut(key).map(|m| {
-                if m.cids.len() < provider::MAX_INLINE_CIDS {
-                    m.cids.insert(cid.clone(), part);
-                }
-                m.inline_image(&cid)
-            })
+            mails.get_mut(key).map(|m| m.inline.serve(&cid))
         };
         match image {
-            Some(InlineImage::Image(mime, bytes)) => {
-                responder.respond(scheme::image(&mime, bytes));
+            Some(InlineLookup::Image(mime, bytes)) => {
+                responder.respond(scheme::image(&mime, Arc::unwrap_or_clone(bytes)));
             }
             _ => responder.respond(scheme::not_found()),
-        }
-    }
-
-    /// Puts the inline images of an opened message's raw source (where its
-    /// provider has one) with the message, once: the source is fetched,
-    /// read for all its images, and kept for the Source view too.
-    fn source_images(&self, app: &mut App, key: u64, address: &str, msg: &Message) {
-        {
-            let mut mails = self.shared.mails.lock().expect("mails lock");
-            match mails.get_mut(key) {
-                Some(m) if !m.source_images => m.source_images = true,
-                _ => return,
-            }
-        }
-        let Some(n) = app.state.position(address) else {
-            return;
-        };
-        let id = app.state.inboxes[n].provider.clone();
-        if !provider::get(&id).is_ok_and(|p| p.caps().raw) {
-            return;
-        }
-        let Ok(raw) = app.with_inbox_at(n, |p, inbox| p.raw(inbox, &msg.id)) else {
-            return;
-        };
-        let images = provider::inline_images(&raw);
-        let mut mails = self.shared.mails.lock().expect("mails lock");
-        if let Some(m) = mails.get_mut(key) {
-            // Kept only up to the message's limit; the rest show as missing.
-            let mut kept = m.inline_kept();
-            for (cid, image) in images {
-                let part = format!("cid {cid}");
-                if m.inline.contains_key(&part) || kept + image.1.len() > provider::MAX_INLINE_TOTAL
-                {
-                    continue;
-                }
-                kept += image.1.len();
-                m.inline.insert(part, image);
-            }
-            if m.source.is_none() {
-                m.source = Some(Arc::new(String::from_utf8_lossy(&raw).into_owned()));
-            }
         }
     }
 

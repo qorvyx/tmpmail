@@ -198,81 +198,12 @@ pub struct Mail {
     pub code: Option<String>,
     /// http(s) links, likely action links first.
     pub links: Vec<String>,
-    /// Inline images already in memory, by the part they are
-    /// (`attachment N`, or `cid ID` from the raw source): (type, bytes).
-    pub inline: HashMap<String, (String, Vec<u8>)>,
-    /// The `cid:` names looked up so far, and the part each one is, if any
-    /// (see [`Mail::inline_image`]).
-    pub cids: HashMap<String, Option<String>>,
-    /// The bytes of inline images served for this message's document so
-    /// far.
-    pub inline_served: usize,
-    /// The listed attachments too big to show inline (alone or past the
-    /// message's limit), so other names for them, and later loads of the
-    /// document, don't fetch them again while the message is open.
-    pub inline_failed: HashSet<String>,
-    /// The listed attachments whose download failed for this load of the
-    /// document: other names for them don't fetch them again, and a reload
-    /// tries again.
-    pub inline_unreachable: HashSet<String>,
+    /// Its inline images, resolved as the frame asks for them, under the
+    /// core's per-message limits ([`provider::InlineImages`], which the
+    /// CLI's `read --html` uses too).
+    pub inline: provider::InlineImages,
     /// The message source once fetched (raw MIME, or the HTML body).
     pub source: Option<Arc<String>>,
-    /// The raw source's inline images are in `inline`, or it couldn't be
-    /// read: it isn't fetched again for another `cid:`.
-    pub source_images: bool,
-}
-
-/// What the app knows of an inline image a frame asks for.
-pub enum InlineImage {
-    /// Its type and bytes, counted against the message's budget.
-    Image(String, Vec<u8>),
-    /// None to show: not found, or past the message's limits.
-    Missing,
-    /// Not looked up yet: the worker resolves it.
-    Unknown,
-}
-
-impl Mail {
-    /// The inline image a frame asks for by `cid`, as far as it is known.
-    /// Images are kept by the part they resolve to, so many `cid:` names for
-    /// one attachment share one copy. At most
-    /// [`provider::MAX_INLINE_CIDS`] distinct names are looked up per
-    /// message, and at most [`provider::MAX_INLINE_TOTAL`] bytes are served
-    /// for each load of its document: a mail can't make the app fetch or
-    /// hold one image a thousand times.
-    pub fn inline_image(&mut self, cid: &str) -> InlineImage {
-        match self.cids.get(cid) {
-            Some(Some(part)) => match self.inline.get(part) {
-                Some((mime, bytes))
-                    if self.inline_served + bytes.len() <= provider::MAX_INLINE_TOTAL =>
-                {
-                    self.inline_served += bytes.len();
-                    InlineImage::Image(mime.clone(), bytes.clone())
-                }
-                _ => InlineImage::Missing,
-            },
-            Some(None) => InlineImage::Missing,
-            None if self.cids.len() >= provider::MAX_INLINE_CIDS => InlineImage::Missing,
-            None => InlineImage::Unknown,
-        }
-    }
-
-    /// Starts the count of a new load of the message's document (the frame
-    /// reloads it when the theme or a view option changes): what it serves
-    /// counts again, and the names that found nothing are looked up again.
-    /// A download that failed is tried again, but a too big attachment
-    /// stays failed ([`Mail::inline_failed`]): a switch of theme doesn't
-    /// download it again.
-    pub fn new_document(&mut self) {
-        self.inline_served = 0;
-        self.inline_unreachable.clear();
-        self.cids.retain(|_, part| part.is_some());
-    }
-
-    /// The bytes of the images kept for this message.
-    pub fn inline_kept(&self) -> usize {
-        self.inline.values().map(|(_, b)| b.len()).sum()
-    }
 }
 
 /// Opened messages by key. Keys are never reused, so a frame can't show a
@@ -308,13 +239,8 @@ impl Mails {
             msg: Arc::new(msg),
             code,
             links,
-            inline: HashMap::new(),
-            cids: HashMap::new(),
-            inline_served: 0,
-            inline_failed: HashSet::new(),
-            inline_unreachable: HashSet::new(),
+            inline: provider::InlineImages::new(),
             source: None,
-            source_images: false,
         }
     }
 
@@ -707,6 +633,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tmpmail::provider::{InlineLookup, InlineStep};
 
     #[test]
     fn opened_mail_links_and_code_are_shown_as_ascii_and_clean() {
@@ -759,37 +686,55 @@ mod tests {
     #[test]
     fn inline_images_are_capped_per_message() {
         // Security review C1: a 9 MiB image under a thousand `cid:` names
-        // is fetched once, kept once, and served only within the limits.
-        let mut mail = Mails::entry("a@b.c", Message::default());
-        let big = vec![0u8; 9 << 20];
-        mail.inline
-            .insert("attachment 0".into(), ("image/png".into(), big));
-        let mut served = 0;
-        let mut unknown = 0;
+        // is fetched once, kept once, and served only within the limits,
+        // the core's (the CLI's `read --html` has the same).
+        let html: String = (0..1000)
+            .map(|i| format!("<img src=\"cid:big.png@{i}\">"))
+            .collect();
+        let msg = Message {
+            html: Some(html),
+            attachments: vec![tmpmail::provider::Attachment {
+                id: "A1".into(),
+                filename: "big.png".into(),
+                content_type: "image/png".into(),
+                size: None,
+                url: None,
+            }],
+            ..Default::default()
+        };
+        let mut mail = Mails::entry("a@b.c", msg.clone());
+        let (mut served, mut unknown, mut fetches) = (0, 0, 0);
         for i in 0..1000 {
             let cid = format!("big.png@{i}");
-            match mail.inline_image(&cid) {
-                InlineImage::Unknown => {
-                    unknown += 1;
-                    // What the worker records once it resolved the name.
-                    mail.cids.insert(cid.clone(), Some("attachment 0".into()));
-                    if let InlineImage::Image(..) = mail.inline_image(&cid) {
-                        served += 1;
+            // What the scheme asks, then the worker's part.
+            if let InlineLookup::Unknown = mail.inline.serve(&cid) {
+                unknown += 1;
+                loop {
+                    match mail.inline.resolve(&msg, &cid) {
+                        InlineStep::Done => break,
+                        InlineStep::FetchAttachment(i) => {
+                            fetches += 1;
+                            mail.inline
+                                .attachment_fetched(&msg, i, Some(vec![0; 9 << 20]));
+                        }
+                        InlineStep::FetchSource => mail.inline.source_fetched(&msg, None),
                     }
                 }
-                InlineImage::Image(..) => served += 1,
-                InlineImage::Missing => {}
+            }
+            if let InlineLookup::Image(..) = mail.inline.serve(&cid) {
+                served += 1;
             }
         }
         assert_eq!(unknown, provider::MAX_INLINE_CIDS);
+        assert_eq!(fetches, 1);
         assert_eq!(served, provider::MAX_INLINE_TOTAL / (9 << 20));
-        assert!(mail.inline_served <= provider::MAX_INLINE_TOTAL);
-        assert_eq!(mail.inline.len(), 1);
+        assert!(mail.inline.served_bytes() <= provider::MAX_INLINE_TOTAL);
+        assert_eq!(mail.inline.kept_bytes(), 9 << 20);
         // A reload of the document (a theme switch) shows them again.
-        mail.new_document();
+        mail.inline.new_document();
         assert!(matches!(
-            mail.inline_image("big.png@0"),
-            InlineImage::Image(..)
+            mail.inline.serve("big.png@0"),
+            InlineLookup::Image(..)
         ));
     }
 
@@ -798,16 +743,37 @@ mod tests {
         // Review of the security round: a reload of the document cleared
         // the failures, so a too big attachment was downloaded again on
         // every theme or view switch.
-        let mut mail = Mails::entry("a@b.c", Message::default());
-        mail.cids.insert("huge@x".into(), None);
-        mail.inline_failed.insert("attachment 0".into());
-        mail.inline_unreachable.insert("attachment 1".into());
-        mail.new_document();
-        assert!(mail.inline_failed.contains("attachment 0"));
+        let att = |id: &str, size| tmpmail::provider::Attachment {
+            id: id.into(),
+            filename: format!("{id}.png"),
+            content_type: "image/png".into(),
+            size,
+            url: None,
+        };
+        let msg = Message {
+            html: Some("<img src=cid:huge><img src=cid:gone>".into()),
+            attachments: vec![att("huge", None), att("gone", None)],
+            ..Default::default()
+        };
+        let mut mail = Mails::entry("a@b.c", msg.clone());
+        let inline = &mut mail.inline;
+        assert_eq!(inline.resolve(&msg, "huge"), InlineStep::FetchAttachment(0));
+        inline.attachment_fetched(&msg, 0, Some(vec![0; provider::MAX_INLINE_IMAGE + 1]));
+        assert_eq!(inline.resolve(&msg, "gone"), InlineStep::FetchAttachment(1));
+        inline.attachment_fetched(&msg, 1, None);
+        assert_eq!(inline.resolve(&msg, "gone"), InlineStep::FetchSource);
+        inline.source_fetched(&msg, None);
+        assert_eq!(inline.resolve(&msg, "gone"), InlineStep::Done);
+        assert_eq!(inline.resolve(&msg, "huge"), InlineStep::Done);
+        inline.new_document();
+        // The name is looked up again, and the too big one isn't fetched
+        // (the source, which couldn't be read, is tried again).
+        assert!(matches!(inline.serve("huge"), InlineLookup::Unknown));
+        assert_eq!(inline.resolve(&msg, "huge"), InlineStep::FetchSource);
+        inline.source_fetched(&msg, None);
+        assert_eq!(inline.resolve(&msg, "huge"), InlineStep::Done);
         // A download that failed is tried again.
-        assert!(mail.inline_unreachable.is_empty());
-        // The name is looked up again, and the worker skips the download.
-        assert!(matches!(mail.inline_image("huge@x"), InlineImage::Unknown));
+        assert_eq!(inline.resolve(&msg, "gone"), InlineStep::FetchAttachment(1));
     }
 
     #[test]

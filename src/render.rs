@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 /// Removes what could rewrite the user's terminal or disguise the text:
 /// terminal escape sequences (CSI and OSC sequences and the other ESC
@@ -521,11 +522,32 @@ pub fn body_text(text: Option<&str>, html: Option<&str>, width: usize) -> String
     }
 }
 
+/// Standard base64 (with padding), for `data:` URLs.
+pub(crate) fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 /// Sanitized standalone HTML document for viewing a message in a browser:
 /// [`sanitize_mail_html`]'s body in a document whose meta CSP blocks scripts
 /// and (unless `allow_remote_images`) remote images, with no referrer.
 pub fn safe_html_document(subject: &str, html: &str, allow_remote_images: bool) -> String {
-    safe_html_document_inline(subject, html, allow_remote_images, &HashMap::new())
+    let body = sanitize(html, allow_remote_images, None, Inline::None);
+    browser_document(subject, &body, allow_remote_images)
 }
 
 /// [`safe_html_document`] with the `cid:` images `inline` has a URL for
@@ -537,7 +559,57 @@ pub fn safe_html_document_inline(
     allow_remote_images: bool,
     inline: &HashMap<String, String>,
 ) -> String {
-    let body = sanitize(html, allow_remote_images, None, inline);
+    let body = sanitize(
+        html,
+        allow_remote_images,
+        None,
+        Inline::Urls(inline.clone()),
+    );
+    browser_document(subject, &body, allow_remote_images)
+}
+
+/// [`safe_html_document`] with the `cid:` images `images` resolved
+/// ([`crate::provider::InlineImages`]) put in as `data:` URLs: each
+/// `<img src="cid:...">` is served through it, so the document holds at most
+/// [`crate::provider::MAX_INLINE_TOTAL`] bytes of images however often the
+/// mail repeats one. The others stay as they are. The resolver comes back,
+/// with what it served ([`crate::provider::InlineImages::shown`]).
+pub fn safe_html_document_images(
+    subject: &str,
+    html: &str,
+    allow_remote_images: bool,
+    images: crate::provider::InlineImages,
+) -> (String, crate::provider::InlineImages) {
+    let served = Arc::new(Mutex::new((images, HashMap::new())));
+    let body = sanitize(
+        html,
+        allow_remote_images,
+        None,
+        Inline::Images(served.clone()),
+    );
+    let images = std::mem::take(&mut served.lock().expect("inline images").0);
+    (
+        browser_document(subject, &body, allow_remote_images),
+        images,
+    )
+}
+
+/// Where the sanitizer finds the `data:` URLs of `cid:` images.
+enum Inline {
+    /// None: `cid:` images stay as they are.
+    None,
+    /// Ready URLs by cid, as [`safe_html_document_inline`] takes them.
+    Urls(HashMap<String, String>),
+    /// Images served through the message's resolver, with each image's
+    /// URL made once (by its bytes' address).
+    Images(Arc<Mutex<Served>>),
+}
+
+/// A resolver and the `data:` URL made for each image it served, by the
+/// image's bytes' address.
+type Served = (crate::provider::InlineImages, HashMap<usize, String>);
+
+fn browser_document(subject: &str, body: &str, allow_remote_images: bool) -> String {
     let img_src = if allow_remote_images {
         "data: cid: https: http:"
     } else {
@@ -569,7 +641,7 @@ pub struct Frame<'a> {
 /// `http:` images are dropped even when remote images are allowed (the
 /// frame's policy would block them anyway).
 pub fn sanitize_mail_html(html: &str, allow_remote_images: bool, frame: Option<&Frame>) -> String {
-    sanitize(html, allow_remote_images, frame, &HashMap::new())
+    sanitize(html, allow_remote_images, frame, Inline::None)
 }
 
 /// The ids of the `cid:` images (`<img src="cid:ID">`) an HTML body shows,
@@ -601,7 +673,7 @@ fn sanitize(
     html: &str,
     allow_remote_images: bool,
     frame: Option<&Frame>,
-    inline: &HashMap<String, String>,
+    inline: Inline,
 ) -> String {
     if html_too_large(html) {
         return format!(
@@ -609,12 +681,12 @@ fn sanitize(
             escape_html(&too_large_text(html))
         );
     }
-    let inline = inline.clone();
     // Each `<img src="cid:...">` gets its own copy of the image's `data:`
     // URL, so one image shown a thousand times would make a copy a thousand
-    // times its size: past the per-message limit (as base64), the rest stay
-    // `cid:`, which the browser can't load.
-    let budget = std::sync::Mutex::new(crate::provider::MAX_INLINE_TOTAL / 3 * 4 + 4096);
+    // times its size: past the per-message limit, the rest stay `cid:`,
+    // which the browser can't load. The resolver counts that itself; ready
+    // URLs count as base64.
+    let budget = Mutex::new(crate::provider::MAX_INLINE_TOTAL / 3 * 4 + 4096);
     let mut builder = ammonia::Builder::default();
     builder
         .add_generic_attributes(["style", "align", "bgcolor", "width", "height", "id"])
@@ -698,20 +770,38 @@ fn sanitize(
             if let (Some(base), Some(id)) = (&cid_base, value.strip_prefix("cid:")) {
                 return Some(Cow::Owned(format!("{base}{}", percent_encode(id))));
             }
-            if let Some(url) = value
-                .strip_prefix("cid:")
-                .and_then(|id| inline.get(&crate::provider::cid_of_url(id)))
-            {
-                let mut left = budget.lock().expect("inline budget");
-                let fits = *left >= url.len();
-                if fits {
-                    *left -= url.len();
+            if let Some(id) = value.strip_prefix("cid:") {
+                let cid = crate::provider::cid_of_url(id);
+                match &inline {
+                    Inline::None => {}
+                    Inline::Urls(urls) => {
+                        if let Some(url) = urls.get(&cid) {
+                            let mut left = budget.lock().expect("inline budget");
+                            let fits = *left >= url.len();
+                            if fits {
+                                *left -= url.len();
+                            }
+                            return Some(if fits {
+                                Cow::Owned(url.clone())
+                            } else {
+                                Cow::Borrowed(value)
+                            });
+                        }
+                    }
+                    Inline::Images(images) => {
+                        let mut images = images.lock().expect("inline images");
+                        let (resolver, urls) = &mut *images;
+                        if let crate::provider::InlineLookup::Image(mime, bytes) =
+                            resolver.serve(&cid)
+                        {
+                            let url =
+                                urls.entry(Arc::as_ptr(&bytes) as usize).or_insert_with(|| {
+                                    format!("data:{mime};base64,{}", base64(&bytes))
+                                });
+                            return Some(Cow::Owned(url.clone()));
+                        }
+                    }
                 }
-                return Some(if fits {
-                    Cow::Owned(url.clone())
-                } else {
-                    Cow::Borrowed(value)
-                });
             }
             let remote = !(is_data_url(value) || value.starts_with("cid:"));
             if remote && !allow_remote_images {

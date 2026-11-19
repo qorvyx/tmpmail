@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 use tauri::http::Response;
 use tauri::ipc::InvokeMessage;
 use tauri::{AppHandle, Manager, Runtime, State, Url};
-use tmpmail::provider::{Attachment, Message};
+use tmpmail::provider::{Attachment, InlineStep, Message};
 use tmpmail::render::{Frame, sanitize_mail_html};
 
 use crate::scheme::{self, html_response};
@@ -126,10 +126,13 @@ impl Probe {
         });
 
         for name in REAL {
-            let mut mail = Mails::entry("probe@tmpmail.invalid", self.message(name));
-            mail.inline
-                .insert(CID.to_string(), ("image/png".into(), PNG.to_vec()));
-            mail.cids.insert(CID.to_string(), Some(CID.to_string()));
+            let msg = self.message(name);
+            let mut mail = Mails::entry("probe@tmpmail.invalid", msg.clone());
+            // The inline image, as if fetched: the listed `probe-logo`.
+            if let InlineStep::FetchAttachment(i) = mail.inline.resolve(&msg, CID) {
+                mail.inline.attachment_fetched(&msg, i, Some(PNG.to_vec()));
+                mail.inline.resolve(&msg, CID);
+            }
             let key = shared.mails.lock().unwrap().insert(mail);
             self.keys.lock().unwrap().push((name.to_string(), key));
         }

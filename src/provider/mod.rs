@@ -1,5 +1,6 @@
 mod dropmail;
 mod guerrilla;
+mod inline;
 mod maildrop;
 mod mailtm;
 mod mime;
@@ -12,6 +13,7 @@ use serde_json::Value;
 
 use crate::error::{Error, Result, unsupported};
 
+pub use inline::{InlineImages, InlineLookup, InlineStep, SourceImages};
 pub use source::{
     MAX_INLINE_CIDS, MAX_INLINE_IMAGE, MAX_INLINE_TOTAL, cid_of_url, image_type, inline_images,
 };

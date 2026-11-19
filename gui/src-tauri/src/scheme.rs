@@ -13,11 +13,11 @@
 
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, UriSchemeResponder};
-use tmpmail::provider::Message;
+use tmpmail::provider::{InlineLookup, Message};
 use tmpmail::render::{Frame, escape_html, has_own_colors, sanitize_mail_html};
 
+use crate::Shared;
 use crate::worker::Req;
-use crate::{InlineImage, Shared};
 
 pub const SCHEME: &str = "tmpmail-mail";
 
@@ -166,7 +166,7 @@ pub fn handle(
                 let mut mails = shared.mails.lock().expect("mails lock");
                 mails.get_mut(key).map(|m| {
                     // A new load of the document asks for its images again.
-                    m.new_document();
+                    m.inline.new_document();
                     (key, m.msg.clone())
                 })
             });
@@ -221,13 +221,15 @@ pub fn handle(
                 let mut mails = shared.mails.lock().expect("mails lock");
                 match mails.get_mut(key) {
                     None => return responder.respond(not_found()),
-                    Some(m) => m.inline_image(&cid),
+                    Some(m) => m.inline.serve(&cid),
                 }
             };
             match (known, shared.worker.get()) {
-                (InlineImage::Image(mime, bytes), _) => responder.respond(image(&mime, bytes)),
-                (InlineImage::Missing, _) => responder.respond(not_found()),
-                (InlineImage::Unknown, Some(tx)) => {
+                (InlineLookup::Image(mime, bytes), _) => {
+                    responder.respond(image(&mime, std::sync::Arc::unwrap_or_clone(bytes)));
+                }
+                (InlineLookup::Missing, _) => responder.respond(not_found()),
+                (InlineLookup::Unknown, Some(tx)) => {
                     // The worker answers (it may need the provider).
                     let _ = tx.send(Req::Inline {
                         key,
@@ -235,7 +237,7 @@ pub fn handle(
                         responder,
                     });
                 }
-                (InlineImage::Unknown, None) => responder.respond(not_found()),
+                (InlineLookup::Unknown, None) => responder.respond(not_found()),
             }
         }
         #[cfg(debug_assertions)]

@@ -1,6 +1,6 @@
 //! The CLI's commands, on top of the core in `app`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::{IsTerminal, Write};
 use std::time::{Duration, Instant};
 
@@ -11,25 +11,6 @@ use crate::error::unsupported;
 
 use super::*;
 use crate::cli::*;
-
-fn base64(bytes: &[u8]) -> String {
-    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
 
 /// How often a cancellable wait checks its flag while sleeping.
 const CANCEL_CHECK: Duration = Duration::from_millis(250);
@@ -326,7 +307,7 @@ impl App {
         self.mark_read_noting(n, &id);
         if a.html {
             let inline = self.inline_images(n, &msg);
-            let view = self.open_html(&msg, a.images, &inline)?;
+            let (view, _) = self.open_html(&msg, a.images, inline)?;
             if let Some(note) = &view.note {
                 self.warn(note);
             }
@@ -430,93 +411,62 @@ impl App {
         out
     }
 
-    /// The inline images (`cid:`) of a message's HTML as `data:` URLs, by
-    /// cid: the attachment the provider lists under that name, else the
-    /// part with that `Content-ID` in the raw source (mail.tm lists inline
-    /// images by file name only), read once for all of them. Raster images
-    /// only, up to [`provider::MAX_INLINE_IMAGE`] each; one that can't be
-    /// fetched is left out. A listed attachment is fetched once however
-    /// many names point at it, at most [`provider::MAX_INLINE_CIDS`] names
-    /// are looked up, and at most [`provider::MAX_INLINE_TOTAL`] bytes of
-    /// images are put in the copy.
-    pub(crate) fn inline_images(&mut self, n: usize, msg: &Message) -> HashMap<String, String> {
-        let mut out = HashMap::new();
-        let Some(html) = &msg.html else {
-            return out;
-        };
+    /// The inline images (`cid:`) of a message's HTML, resolved by the
+    /// core's [`provider::InlineImages`] (the desktop app's too): the
+    /// attachment the provider lists under that name, else the part with
+    /// that `Content-ID` in the raw source (mail.tm lists inline images by
+    /// file name only), read once for all of them. A listed attachment is
+    /// fetched once however many names point at it; one that can't be
+    /// fetched is left out; the per-message limits are the resolver's.
+    pub(crate) fn inline_images(&mut self, n: usize, msg: &Message) -> provider::InlineImages {
+        let mut images = provider::InlineImages::new();
+        if msg.html.is_none() {
+            return images;
+        }
         let id = self.state.inboxes[n].provider.clone();
         let can_raw = self.provider(&id).is_ok_and(|p| p.caps().raw);
-        let mut from_source: Option<HashMap<String, (String, Vec<u8>)>> = None;
-        // By attachment: its `data:` URL and size, or None if it can't be
-        // shown, so other names for it reuse that.
-        let mut fetched: HashMap<usize, Option<(std::sync::Arc<String>, usize)>> = HashMap::new();
-        let mut total = 0;
-        let fits = |len: usize, total: usize| {
-            len <= provider::MAX_INLINE_IMAGE && total + len <= provider::MAX_INLINE_TOTAL
-        };
-        let cids = crate::render::cid_images(html);
-        for cid in cids.into_iter().take(provider::MAX_INLINE_CIDS) {
-            let listed = provider::inline_attachment(msg, &cid).and_then(|(att, mime)| {
-                let i = msg.attachments.iter().position(|a| std::ptr::eq(a, att))?;
-                let listed_size = att.size.and_then(|s| usize::try_from(s).ok());
-                fetched
-                    .entry(i)
-                    .or_insert_with(|| {
-                        if listed_size.is_some_and(|len| !fits(len, total)) {
-                            return None;
-                        }
-                        let bytes = self
-                            .with_inbox_at(n, |p, inbox| p.attachment(inbox, msg, att))
+        // Both fetches need the App; they never run at once.
+        let app = std::cell::RefCell::new(self);
+        images.fetch_all(
+            msg,
+            |att| {
+                app.borrow_mut()
+                    .with_inbox_at(n, |p, inbox| p.attachment(inbox, msg, att))
+                    .ok()
+            },
+            || {
+                can_raw
+                    .then(|| {
+                        app.borrow_mut()
+                            .with_inbox_at(n, |p, inbox| p.raw(inbox, &msg.id))
                             .ok()
-                            .filter(|b| b.len() <= provider::MAX_INLINE_IMAGE)?;
-                        let url = format!("data:{mime};base64,{}", base64(&bytes));
-                        Some((std::sync::Arc::new(url), bytes.len()))
                     })
-                    .clone()
-            });
-            let image = match listed {
-                Some(image) => Some(image),
-                None if can_raw => from_source
-                    .get_or_insert_with(|| {
-                        self.with_inbox_at(n, |p, inbox| p.raw(inbox, &msg.id))
-                            .map(|raw| provider::inline_images(&raw))
-                            .unwrap_or_default()
-                    })
-                    .remove(&cid)
-                    .filter(|(_, b)| b.len() <= provider::MAX_INLINE_IMAGE)
-                    .map(|(mime, bytes)| {
-                        let url = format!("data:{mime};base64,{}", base64(&bytes));
-                        (std::sync::Arc::new(url), bytes.len())
-                    }),
-                None => None,
-            };
-            if let Some((url, len)) = image.filter(|(_, len)| fits(*len, total)) {
-                total += len;
-                out.insert(cid, url.as_str().to_string());
-            }
-        }
-        out
+                    .flatten()
+            },
+        );
+        images
     }
 
     /// Writes the message's sanitized HTML to a private file, opens it in
-    /// the browser and returns the file. `inline` has the `data:`
-    /// URLs of its `cid:` images ([`App::inline_images`]).
+    /// the browser and returns the file, with how many of the `cid:` images
+    /// `inline` has ([`App::inline_images`]) it shows.
     pub(crate) fn open_html(
         &self,
         msg: &Message,
         images: bool,
-        inline: &HashMap<String, String>,
-    ) -> Result<system::View> {
+        inline: provider::InlineImages,
+    ) -> Result<(system::View, usize)> {
         let html = match (&msg.html, &msg.text) {
             (Some(h), _) => h.clone(),
             (None, Some(t)) => format!("<pre>{}</pre>", crate::render::escape_html(t)),
             (None, None) => String::new(),
         };
-        let doc = safe_html_document_inline(&msg.subject, &html, images, inline);
+        let (doc, inline) =
+            crate::render::safe_html_document_images(&msg.subject, &html, images, inline);
         let name = format!("{}.html", safe_filename(&msg.id, "message"));
         let browser = self.browser();
         let view = system::write_view(self.store.dir(), browser.as_deref(), &name, &doc)?;
-        Ok(system::open_view(view, browser.as_deref())?)
+        Ok((system::open_view(view, browser.as_deref())?, inline.shown()))
     }
 
     // ----- wait / otp / links -----
@@ -1496,6 +1446,7 @@ fn create_unique(path: &std::path::Path) -> std::io::Result<(std::path::PathBuf,
 mod tests {
     use super::*;
     use crate::provider::Attachment;
+    use crate::render::{base64, safe_html_document_images};
     use chrono::TimeZone;
 
     /// A provider whose inbox holds `mail` (id, subject, minute it came in).
@@ -1815,10 +1766,11 @@ mod tests {
         };
         let inline = app.inline_images(0, &msg);
         assert_eq!(BIG_FETCHES.load(std::sync::atomic::Ordering::Relaxed), 1);
-        assert_eq!(inline.len(), provider::MAX_INLINE_TOTAL / (9 << 20));
-        // The same name a hundred times is put in the copy within the
-        // limit too.
-        let doc = safe_html_document_inline("s", &html, false, &inline);
+        assert_eq!(inline.found(), provider::MAX_INLINE_CIDS);
+        assert_eq!(inline.kept_bytes(), 9 << 20);
+        // Shown within the limit, the same name a hundred times too.
+        let (doc, inline) = safe_html_document_images("s", &html, false, inline);
+        assert_eq!(inline.shown(), 2);
         let shown = doc.matches("data:image/png;base64,").count();
         assert_eq!(shown, 2, "{shown}");
         assert!(doc.len() < provider::MAX_INLINE_TOTAL * 2);
@@ -1849,19 +1801,16 @@ mod tests {
         };
         let inline = app.inline_images(0, &msg);
         // From the source, by Content-ID; and by file name, from the listing.
-        assert_eq!(inline[CID], "data:image/png;base64,iVBORw0KGgo=");
-        assert_eq!(
-            inline["logo.png"],
-            format!("data:image/png;base64,{}", base64(b"bytes of logo.png"))
-        );
-        assert_eq!(inline.len(), 2);
+        assert_eq!(inline.found(), 2);
         // The copy for the browser shows them (its policy allows `data:`);
         // a cid without an image stays.
-        let doc = safe_html_document_inline("s", msg.html.as_deref().unwrap(), false, &inline);
+        let (doc, _) = safe_html_document_images("s", msg.html.as_deref().unwrap(), false, inline);
         assert!(
             doc.contains(r#"src="data:image/png;base64,iVBORw0KGgo=""#),
             "{doc}"
         );
+        let logo = format!("data:image/png;base64,{}", base64(b"bytes of logo.png"));
+        assert!(doc.contains(&logo), "{doc}");
         assert_eq!(doc.matches("data:image/png;base64,").count(), 2, "{doc}");
         assert!(doc.contains(r#"src="cid:gone@x""#), "{doc}");
     }

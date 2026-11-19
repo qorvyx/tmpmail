@@ -485,7 +485,9 @@ to `probe.log`, both are uploaded, and the job fails unless `probe.json` parses 
    SVG. They are kept by the part they are, so many `cid:` names for one attachment fetch
    and keep it once; at most 64 names are looked up per message and 25 MiB of images
    served each time it is shown (a sender's mail of a thousand names for one big image can't make the
-   app download and hold it a thousand times). The source view goes through the same scheme as escaped text, under a CSP with no
+   app download and hold it a thousand times). These limits live in the core's resolver
+   (`tmpmail::provider::InlineImages`), which the CLI's `read --html` and the TUI's `o` use
+   too, so all three show the same images. The source view goes through the same scheme as escaped text, under a CSP with no
    images at all.
 3. It is shown in `<iframe sandbox="allow-popups">`: no scripts, an opaque origin, no IPC.
    The mail and source documents' own CSP headers carry the same `sandbox allow-popups`

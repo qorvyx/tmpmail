@@ -981,6 +981,14 @@ impl App {
     fn save(&mut self, a: SaveArgs) -> Result<()> {
         let (wanted, out_dir) = (&a.attachments, &a.output);
         std::fs::create_dir_all(out_dir).map_err(anyhow::Error::from)?;
+        let room = name_room(out_dir, cfg!(windows));
+        if room.is_some_and(|r| r < MIN_NAME_ROOM) {
+            self.warn(&format!(
+                "{} is a long path: programs that don't take long paths on Windows may not \
+                 open the saved files",
+                out_dir.display()
+            ));
+        }
         let (saved, failed) = self.with_message(Some(&a.id), |p, inbox, id| {
             let msg = p.get(inbox, id)?;
             let selected: Vec<_> = msg
@@ -999,7 +1007,10 @@ impl App {
             // `/`) doesn't stop the others; a provider or disk failure does.
             let (mut saved, mut failed) = (Vec::new(), Vec::new());
             for (n, att) in selected.iter().enumerate() {
-                let name = safe_filename(&att.filename, &format!("attachment-{}", n + 1));
+                let name = fit_name(
+                    &safe_filename(&att.filename, &format!("attachment-{}", n + 1)),
+                    room,
+                );
                 let result = p.attachment(inbox, &msg, att).and_then(|data| {
                     let (path, mut file) = create_unique(&out_dir.join(&name)).map_err(|e| {
                         anyhow::anyhow!("cannot create {}: {e}", out_dir.join(&name).display())
@@ -1408,6 +1419,49 @@ fn human_size(n: u64) -> String {
         1024..1_048_576 => format!("{:.1} KB", n as f64 / 1024.0),
         _ => format!("{:.1} MB", n as f64 / 1_048_576.0),
     }
+}
+
+/// Windows: the longest whole path most programs open (`MAX_PATH` less
+/// its terminator) while long paths are off, as they are by default.
+const WINDOWS_MAX_PATH: usize = 259;
+
+/// The least room a saved name gets, however long the folder's path.
+const MIN_NAME_ROOM: usize = 32;
+
+/// How many UTF-16 units a file name in `dir` may have, on Windows
+/// (`windows`), for the whole path, with a ` (9999)` added for a taken
+/// name, to stay within [`WINDOWS_MAX_PATH`]; at least
+/// [`MIN_NAME_ROOM`] less one when the folder leaves less (the caller
+/// warns). `None`: no limit (other systems, or a `\\?\` folder, which asks
+/// for long paths).
+fn name_room(dir: &std::path::Path, windows: bool) -> Option<usize> {
+    if !windows || dir.to_string_lossy().starts_with(r"\\?\") {
+        return None;
+    }
+    let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let used = dir.to_string_lossy().encode_utf16().count() + 1 + " (9999)".len();
+    Some(WINDOWS_MAX_PATH.saturating_sub(used).max(MIN_NAME_ROOM - 1))
+}
+
+/// `name` cut, keeping its extension, to at most `room` UTF-16 units.
+fn fit_name(name: &str, room: Option<usize>) -> String {
+    let Some(room) = room else {
+        return name.to_string();
+    };
+    if name.encode_utf16().count() <= room {
+        return name.to_string();
+    }
+    let ext = crate::render::short_extension(name);
+    let mut left = room.saturating_sub(ext.encode_utf16().count());
+    let mut bytes = 0;
+    for c in name.chars() {
+        if c.len_utf16() > left {
+            break;
+        }
+        left -= c.len_utf16();
+        bytes += c.len_utf8();
+    }
+    crate::render::cap_filename(name, bytes + ext.len())
 }
 
 /// Creates `path` as a new file, or `name (1).ext`, `name (2).ext`, ... if
@@ -1967,6 +2021,44 @@ mod tests {
         assert!(matches!(err, Error::Unsupported { .. }), "{err}");
         assert!(err.to_string().contains("a@x.com"), "{err}");
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn saved_names_fit_a_windows_path() {
+        let name = format!("{}.txt", "L".repeat(240));
+        let capped = safe_filename(&name, "f");
+        assert_eq!(capped.len(), 200);
+        assert!(capped.ends_with(".txt"));
+        let fits = |dir: &std::path::Path, name: &str| {
+            let dir = std::path::absolute(dir).unwrap();
+            dir.to_string_lossy().encode_utf16().count() + 1 + name.encode_utf16().count() + 7
+                <= WINDOWS_MAX_PATH
+        };
+        // Elsewhere, or in a folder that asks for long paths, it is kept.
+        let dir = std::path::Path::new("/Users/Docker/savetest");
+        assert_eq!(name_room(dir, false), None);
+        assert_eq!(name_room(std::path::Path::new(r"\\?\C:\deep"), true), None);
+        assert_eq!(fit_name(&capped, None), capped);
+        // Round 3's case: C:\Users\Docker\savetest plus the name was 265.
+        let room = name_room(dir, true);
+        let fitted = fit_name(&capped, room);
+        assert!(fitted.ends_with(".txt") && fits(dir, &fitted), "{fitted}");
+        assert_eq!(fit_name("a.pdf", room), "a.pdf");
+        // Counted in UTF-16 units, so CJK names keep what fits.
+        let wide = fit_name(&format!("{}.txt", "日".repeat(300)), room);
+        assert!(fits(dir, &wide), "{wide}");
+        assert!(wide.chars().count() > 200, "{}", wide.chars().count());
+        let accents = fit_name(&"é".repeat(300), room);
+        assert!(fits(dir, &accents));
+        // A folder that leaves no room still gets some.
+        let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(300)));
+        let room = name_room(&deep, true);
+        assert!(room.is_some_and(|r| r < MIN_NAME_ROOM));
+        let tight = fit_name(&capped, room);
+        assert!(
+            tight.len() < MIN_NAME_ROOM && tight.ends_with(".txt"),
+            "{tight}"
+        );
     }
 
     #[test]

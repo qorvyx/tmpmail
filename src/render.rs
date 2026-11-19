@@ -1256,10 +1256,11 @@ pub fn escape_html(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// The longest name [`safe_filename`] gives, in bytes: under the 255 of
-/// most file systems, with room for the ` (9999)` a saver adds to a name
-/// that is taken.
-const MAX_FILENAME: usize = 240;
+/// The longest name [`safe_filename`] gives, in bytes: well under the 255
+/// of most file systems, with room for the ` (9999)` a saver adds to a
+/// name that is taken, and for a folder path in front (Windows programs
+/// that don't take long paths stop at 259 characters in all).
+const MAX_FILENAME: usize = 200;
 
 /// Safe basename for saving an attachment: the last path component only,
 /// no control or invisible characters, none of `: * ? " < > |` (Windows),
@@ -1294,20 +1295,31 @@ pub fn safe_filename(name: &str, fallback: &str) -> String {
     if is_device_name(stem) {
         out.insert(0, '_');
     }
-    if out.len() > MAX_FILENAME {
-        // Keep a short extension; cut the rest on a character boundary.
-        let ext = out
-            .rfind('.')
-            .filter(|&i| i > 0 && out.len() - i <= 16)
-            .map(|i| out[i..].to_string())
-            .unwrap_or_default();
-        let mut cut = MAX_FILENAME - ext.len();
-        while !out.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        out = format!("{}{ext}", out[..cut].trim_end_matches(['.', ' ']));
+    cap_filename(&out, MAX_FILENAME)
+}
+
+/// `name` cut to at most `max` bytes (at least 17), keeping a short
+/// extension (up to 16 bytes, dot included), on a character boundary and
+/// with no dot or space left at the end of what is kept.
+pub fn cap_filename(name: &str, max: usize) -> String {
+    let max = max.max(17);
+    if name.len() <= max {
+        return name.to_string();
     }
-    out
+    let ext = short_extension(name);
+    let mut cut = max - ext.len();
+    while !name.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}{ext}", name[..cut].trim_end_matches(['.', ' ']))
+}
+
+/// The extension [`cap_filename`] keeps: from the last dot (not a
+/// leading one), if that is at most 16 bytes; else empty.
+pub(crate) fn short_extension(name: &str) -> &str {
+    name.rfind('.')
+        .filter(|&i| i > 0 && name.len() - i <= 16)
+        .map_or("", |i| &name[i..])
 }
 
 /// Whether `stem` names a Windows device (any case): `CON`, `PRN`, `AUX`,

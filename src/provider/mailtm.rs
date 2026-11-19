@@ -207,12 +207,9 @@ fn is_text_copy(html: &str, text: &str) -> bool {
         rest = &tail[end + 1..];
     }
     plain.push_str(rest);
-    let plain = plain
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&amp;", "&");
+    // In one pass, so `&#38;lt;` stays `&lt;`; numeric references too
+    // (mail.tm writes the text's control characters as `&#x1B;`).
+    let plain = crate::extract::decode_entities(&plain);
     let (h, t): (Vec<&str>, Vec<&str>) = (
         plain.split_whitespace().collect(),
         text.split_whitespace().collect(),
@@ -662,6 +659,13 @@ mod tests {
         // Not cut: every word, so a fuller HTML part is the sender's.
         assert!(!is_text_copy("<p>one two thr", "one two three four"));
         assert!(!is_text_copy("<p>Hi,</p><p>Your code is 482913</p>", "Hi,"));
+        // mail.tm writes the text's control characters as references.
+        assert!(is_text_copy(
+            "<p>bell&#x7;ring &#27;[31mred &#X202E;idib</p>",
+            "bell\u{7}ring \u{1b}[31mred \u{202e}idib"
+        ));
+        assert!(!is_text_copy("<p>&#38;lt;b&#38;gt;</p>", "<b>"));
+        assert!(is_text_copy("<p>&#38;lt;b&#38;gt;</p>", "&lt;b&gt;"));
         for (html, text) in [
             // The sender's own HTML.
             ("<p>Hi <b>there</b></p>", "Hi there"),

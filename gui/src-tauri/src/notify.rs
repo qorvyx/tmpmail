@@ -470,9 +470,40 @@ fn show_with_plugin(
 }
 
 /// Whether new mail should be announced: the setting is on and the window
-/// isn't focused (a hidden or minimized window never is).
+/// isn't focused (a hidden or minimized window never is); on Windows the
+/// focus only counts while the app is in front (see [`in_front`]).
 pub fn wanted(shared: &Shared) -> bool {
-    shared.gui.lock().expect("gui lock").notifications && !shared.focused.load(Ordering::Relaxed)
+    shared.gui.lock().expect("gui lock").notifications
+        && !(shared.focused.load(Ordering::Relaxed) && in_front())
+}
+
+/// Windows: whether the window in front is one of this app's. After a
+/// notification click that brought the window up without the focus,
+/// Windows can leave the "focused" event standing while another window is
+/// in front, which would silence every later notification; so the focus
+/// flag only counts while the app really is in front. Elsewhere the flag
+/// is trusted as is.
+#[cfg(windows)]
+fn in_front() -> bool {
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    // SAFETY: plain Win32 queries; `pid` outlives the call.
+    unsafe {
+        let front = GetForegroundWindow();
+        // None during an activation change or on the secure desktop: then
+        // the focus flag decides.
+        if front.is_invalid() {
+            return true;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(front, Some(&mut pid as *mut u32));
+        pid == GetCurrentProcessId()
+    }
+}
+
+#[cfg(not(windows))]
+fn in_front() -> bool {
+    true
 }
 
 /// What a notification click asked for before the page could take it.

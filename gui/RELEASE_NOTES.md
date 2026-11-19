@@ -11,8 +11,10 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 
 - **Notification clicks bring the window to the front on Windows.** A click on a toast, or
   on its entry in the notification center, restored the window and opened the message, but
-  left it behind the window in front. The app now takes the foreground (and if Windows still
-  refuses, puts the window above the others).
+  left it behind the window in front. The app now comes to the front; Windows may still keep
+  the keyboard focus on the other window (its taskbar button flashes) until you click in the
+  app, and new mail is announced meanwhile.
+- **Plain-text mail with control characters** shows as text too, not as mail.tm's HTML copy.
 - **The Save dialog starts in Downloads.** The first Save of an attachment opened in the
   app's own folder (on Windows the install folder, which is also where the command-line
   tool keeps its inboxes).

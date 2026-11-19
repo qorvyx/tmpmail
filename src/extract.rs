@@ -366,7 +366,7 @@ use crate::render::is_invisible;
 
 /// Decodes HTML character references (`&amp;`, `&#38;`, `&#x26;`, and the
 /// few named ones URLs use); anything else is left as written.
-fn decode_entities(s: &str) -> String {
+pub(crate) fn decode_entities(s: &str) -> String {
     if !s.contains('&') {
         return s.to_string();
     }

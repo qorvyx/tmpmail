@@ -144,6 +144,13 @@ if (!(Test-Path $PROFILE)) { New-Item -Force $PROFILE }
 Add-Content $PROFILE '. $HOME\tmpmail-completions.ps1'
 ```
 
+Windows PowerShell 5.1 doesn't run a profile until scripts are allowed for your account; if a
+new window says "running scripts is disabled on this system", allow local scripts once:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
 #### Upgrade and uninstall
 
 | Installed with | Upgrade | Uninstall |

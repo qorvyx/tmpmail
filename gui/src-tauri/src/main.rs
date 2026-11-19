@@ -186,6 +186,9 @@ pub struct Shared {
     pub freedesktop: OnceLock<Arc<freedesktop::Notifier>>,
     /// Attachments written out for dragging.
     pub drag: drag::Files,
+    /// The folder an attachment was last saved to in this run, where the
+    /// next Save dialog starts.
+    pub save_dir: Mutex<Option<std::path::PathBuf>>,
     #[cfg(debug_assertions)]
     pub probe: Option<probe::Probe>,
 }
@@ -423,6 +426,7 @@ fn main() {
         #[cfg(target_os = "linux")]
         freedesktop: OnceLock::new(),
         drag: drag::Files::default(),
+        save_dir: Mutex::new(None),
         #[cfg(debug_assertions)]
         probe,
     });

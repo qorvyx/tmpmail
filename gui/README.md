@@ -43,9 +43,10 @@ a safe HTML preview in light or dark, and the TUI's actions and keys. Released o
     they list for it; the app reads an image's `attachment:ID` as that image attachment of
     the same message, and reads mail.tm's raw message, which leaves out the line break
     after each part's boundary (in 0.1.3 their inline images showed only their alt text).
-  - Attachments with name, type and size, and Save (a native save dialog; never overwrites
-    an existing file). On Linux and macOS an attachment can also be dragged out by its grip
-    to a folder or another app (see "Dragging attachments out").
+  - Attachments with name, type and size, and Save (a native save dialog that starts in
+    your Downloads folder, or in the folder you last saved to while the app runs; never
+    overwrites an existing file). On Linux and macOS an attachment can also be dragged out
+    by its grip to a folder or another app (see "Dragging attachments out").
 - **Notifications:** new mail while the window isn't focused (or is hidden in the tray)
   shows a system notification with the sender and subject, and the code when the subject or
   preview has one ("Code 482913 from GitHub"). Mail arriving within 2 s is grouped into one

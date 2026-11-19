@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::mpsc::channel;
 
 use serde_json::{Value, json};
-use tauri::{AppHandle, State, Url, WebviewWindow};
+use tauri::{AppHandle, Manager, State, Url, WebviewWindow};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -338,17 +338,32 @@ pub async fn save_attachment(
         .get()
         .cloned()
         .ok_or("the worker is not running")?;
+    let last = shared.save_dir.lock().expect("save dir lock").clone();
+    let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(picked) = app
+        // Checked here: a folder on a share that went away can take long.
+        let start = save_start(
+            last,
+            app.path().download_dir().ok(),
+            app.path().home_dir().ok(),
+        );
+        let mut dialog = app
             .dialog()
             .file()
             .set_title("Save attachment")
-            .set_file_name(&filename)
-            .blocking_save_file()
-        else {
+            .set_file_name(&filename);
+        if let Some(dir) = start {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(picked) = dialog.blocking_save_file() else {
             return Ok(None);
         };
         let path = picked.into_path().map_err(|e| e.to_string())?;
+        // Picked, so the next dialog starts there, also when this save is
+        // refused (a file of that name is there) or fails.
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            *shared.save_dir.lock().expect("save dir lock") = Some(dir.to_path_buf());
+        }
         let (reply, answer) = channel();
         worker
             .send(Req::Attachment { key, index, reply })
@@ -383,6 +398,21 @@ pub async fn save_attachment(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Where the Save dialog starts: the folder of the last save in this run,
+/// else Downloads, else home, rather than the dialog's own default (on
+/// Windows the install folder, next to the CLI's state). Only a folder that
+/// is there now; `None` (the dialog's default) if none is.
+fn save_start(
+    last: Option<std::path::PathBuf>,
+    downloads: Option<std::path::PathBuf>,
+    home: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    [last, downloads, home]
+        .into_iter()
+        .flatten()
+        .find(|d| d.is_dir())
 }
 
 /// The settings screen's fields, as they are in the files.
@@ -563,5 +593,32 @@ mod tests {
         );
         assert_eq!(sender_address("noreply@github.com"), "noreply@github.com");
         assert_eq!(sender_address("Odd <name>"), "Odd <name>");
+    }
+
+    #[test]
+    fn the_save_dialog_starts_in_the_last_folder_then_downloads_then_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let (last, downloads, home) = (
+            dir.path().join("last"),
+            dir.path().join("Downloads"),
+            dir.path().join("home"),
+        );
+        let gone = dir.path().join("gone");
+        for d in [&last, &downloads, &home] {
+            std::fs::create_dir(d).unwrap();
+        }
+        let start = |l: Option<&std::path::PathBuf>, d: Option<&std::path::PathBuf>| {
+            save_start(l.cloned(), d.cloned(), Some(home.clone()))
+        };
+        assert_eq!(start(Some(&last), Some(&downloads)), Some(last.clone()));
+        assert_eq!(start(None, Some(&downloads)), Some(downloads.clone()));
+        // A folder that is gone (or a system without Downloads) passes on.
+        assert_eq!(
+            start(Some(&gone), Some(&downloads)),
+            Some(downloads.clone())
+        );
+        assert_eq!(start(None, Some(&gone)), Some(home.clone()));
+        assert_eq!(start(None, None), Some(home.clone()));
+        assert_eq!(save_start(None, None, None), None);
     }
 }

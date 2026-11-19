@@ -73,12 +73,12 @@ Each release from 0.3.6 on has them. For x86_64; on ARM, use `arm64` in place of
 
 ```sh
 # Debian, Ubuntu and others with apt
-curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/tmpmail-cli_0.3.6_amd64.deb
-sudo apt install ./tmpmail-cli_0.3.6_amd64.deb
+curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-cli_0.3.7_amd64.deb
+sudo apt install ./tmpmail-cli_0.3.7_amd64.deb
 
 # Fedora and others with dnf
-curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/tmpmail-cli-0.3.6-1.x86_64.rpm
-sudo dnf install ./tmpmail-cli-0.3.6-1.x86_64.rpm
+curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-cli-0.3.7-1.x86_64.rpm
+sudo dnf install ./tmpmail-cli-0.3.7-1.x86_64.rpm
 ```
 
 The package is named `tmpmail-cli` (the desktop app's is `tmpmail`), so both install side by
@@ -94,9 +94,9 @@ file the same way.
 For x86_64 (on ARM, use `aarch64` in place of `x86_64`):
 
 ```sh
-curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz
-tar xzf tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz
-install -D -t ~/.local/bin tmpmail-0.3.6-x86_64-unknown-linux-musl/tmpmail
+curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz
+tar xzf tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz
+install -D -t ~/.local/bin tmpmail-0.3.7-x86_64-unknown-linux-musl/tmpmail
 ```
 
 If a new shell then says `tmpmail: command not found` (Arch, for one, doesn't put `~/.local/bin`
@@ -122,7 +122,7 @@ with its line in `SHA256SUMS`. Or check the attestation (this needs the GitHub C
 later, logged in with `gh auth login` or `GH_TOKEN` set):
 
 ```sh
-gh attestation verify tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
+gh attestation verify tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
   --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml
 ```
 
@@ -172,7 +172,7 @@ Linux (`pbcopy` on macOS, `clip.exe` on Windows); `read --html` opens your brows
 
 ### Desktop app
 
-**[Download the desktop app (version 0.1.5)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.5)**
+**[Download the desktop app (version 0.1.6)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.6)**
 and pick the file for your system. (The release GitHub marks "Latest" belongs to the
 command-line tool and has no desktop files.)
 
@@ -394,11 +394,11 @@ In GitHub Actions:
 - name: Install tmpmail
   run: |
     mkdir -p ~/.local/bin && cd "$RUNNER_TEMP"
-    curl -sSfL -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz \
-      -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/SHA256SUMS
+    curl -sSfL -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz \
+      -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
-    tar xzf tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz --strip-components=1 \
-      -C ~/.local/bin tmpmail-0.3.6-x86_64-unknown-linux-musl/tmpmail
+    tar xzf tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz --strip-components=1 \
+      -C ~/.local/bin tmpmail-0.3.7-x86_64-unknown-linux-musl/tmpmail
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 - name: Sign-up test

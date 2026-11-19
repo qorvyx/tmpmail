@@ -1,8 +1,10 @@
-tmpmail desktop 0.1.5 adds a Homebrew cask for macOS, keeps the AppImage's own settings away
-from the browser or mail client it opens for a link, and updates the HTML sanitizer for a
-security fix. It is built on the same core as the `tmpmail` command-line tool 0.3.6, which
-now also comes as `.deb` and `.rpm` packages (`tmpmail-cli`) that install beside this app,
-and it shares the tool's inboxes and `config.toml`.
+tmpmail desktop 0.1.6 fixes what came up on Windows and elsewhere: on Windows a notification
+click brings the window to the front and the title bar follows the dark theme; everywhere the
+Save dialog starts in Downloads, numbered mail no longer shows a false code, plain-text mail
+keeps its indentation, and the message pane says when a provider's rate limit holds a message
+back.
+It is built on the same core as the `tmpmail` command-line tool 0.3.7 and shares the tool's
+inboxes and `config.toml`.
 
 It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS and on Windows. Please report
 what breaks: <https://github.com/qorvyx/tmpmail/issues>.
@@ -14,7 +16,6 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
   left it behind the window in front. The app now comes to the front; Windows may still keep
   the keyboard focus on the other window (its taskbar button flashes) until you click in the
   app, and new mail is announced meanwhile.
-- **Plain-text mail with control characters** shows as text too, not as mail.tm's HTML copy.
 - **The Save dialog starts in Downloads.** The first Save of an attachment opened in the
   app's own folder (on Windows the install folder, which is also where the command-line
   tool keeps its inboxes).
@@ -23,8 +24,9 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 - **No false code on numbered mail.** A mail whose lines are numbered (`Line 00001 …`)
   showed a code banner with `00001`; the shared detector of `tmpmail` 0.3.7 no longer takes
   such numbers for codes.
-- **Plain-text mail keeps its indentation.** mail.tm and mail.gw send an HTML copy of a
-  text-only mail that drops leading spaces; the app now shows such a mail as the text it is.
+- **Plain-text mail shows as sent.** mail.tm and mail.gw send an HTML copy of a text-only
+  mail that drops its leading spaces and writes control characters as character references
+  (`&#x1B;`); the app now shows such a mail as the text it is, indentation included.
 - **A rate limit says so.** While a message opens and a provider is limiting requests
   (the message's own, or another the app is busy asking first), the message pane says
   "mail.tm is limiting requests; retrying in N s" instead of showing only its placeholder.
@@ -254,17 +256,17 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 
 | System | File |
 |---|---|
-| Windows 10/11 (x64) | `tmpmail-desktop-0.1.5-x64-setup.exe` |
-| macOS 10.15+ (Apple silicon and Intel) | `tmpmail-desktop-0.1.5-universal.dmg` |
-| Debian, Ubuntu (x86_64) | `tmpmail-desktop-0.1.5-amd64.deb` |
-| Fedora and other RPM-based (x86_64) | `tmpmail-desktop-0.1.5-x86_64.rpm` |
-| Other Linux (x86_64) | `tmpmail-desktop-0.1.5-x86_64.AppImage` |
+| Windows 10/11 (x64) | `tmpmail-desktop-0.1.6-x64-setup.exe` |
+| macOS 10.15+ (Apple silicon and Intel) | `tmpmail-desktop-0.1.6-universal.dmg` |
+| Debian, Ubuntu (x86_64) | `tmpmail-desktop-0.1.6-amd64.deb` |
+| Fedora and other RPM-based (x86_64) | `tmpmail-desktop-0.1.6-x86_64.rpm` |
+| Other Linux (x86_64) | `tmpmail-desktop-0.1.6-x86_64.AppImage` |
 
 Check a download against `SHA256SUMS` (`sha256sum -c --ignore-missing SHA256SUMS`), or its
 build attestation (GitHub CLI 2.49 or later, logged in):
 
 ```sh
-gh attestation verify tmpmail-desktop-0.1.5-x86_64.AppImage --repo qorvyx/tmpmail \
+gh attestation verify tmpmail-desktop-0.1.6-x86_64.AppImage --repo qorvyx/tmpmail \
   --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml
 ```
 
@@ -284,8 +286,8 @@ The app isn't signed with a paid certificate, so each system warns once.
   fetches WebView2 if it's missing. If **Smart App Control** is on, it blocks the installer
   outright with no way past; it can only be turned off as a whole (Windows Security → App &
   browser control).
-- **Linux:** `sudo apt install ./tmpmail-desktop-0.1.5-amd64.deb`, or `sudo dnf install
-  ./tmpmail-desktop-0.1.5-x86_64.rpm`; both pull in WebKitGTK 4.1. The AppImage runs
+- **Linux:** `sudo apt install ./tmpmail-desktop-0.1.6-amd64.deb`, or `sudo dnf install
+  ./tmpmail-desktop-0.1.6-x86_64.rpm`; both pull in WebKitGTK 4.1. The AppImage runs
   as is after `chmod +x` (it may need `libfuse2`; without FUSE, run it with
   `--appimage-extract-and-run`). On NVIDIA, if the window stays blank, start it with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1`.

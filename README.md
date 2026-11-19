@@ -81,9 +81,17 @@ curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-cli
 sudo dnf install ./tmpmail-cli-0.3.7-1.x86_64.rpm
 ```
 
-The package is named `tmpmail-cli` (the desktop app's is `tmpmail`), so both install side by
-side. It puts `tmpmail` in `/usr/bin` with its man pages (`man tmpmail`) and the bash, zsh
-and fish completions. It runs on its own; two extras help: `xdg-utils` opens mail and links
+This installs the command-line tool only; the desktop app is a separate download. The two
+packages have different names and share no files, so both can be installed side by side.
+Their package names (what `apt remove` and `dnf remove` take) aren't the commands:
+
+| Package name | Command | What it is |
+|---|---|---|
+| `tmpmail-cli` | `tmpmail` | the command-line tool |
+| `tmpmail` | `tmpmail-gui` | the [desktop app](#desktop-app) |
+
+The `tmpmail-cli` package puts `tmpmail` in `/usr/bin` with its man pages (`man tmpmail`) and
+the bash, zsh and fish completions. It runs on its own; two extras help: `xdg-utils` opens mail and links
 in the browser (recommended, so apt and dnf install it too unless you add
 `--no-install-recommends` or `--setopt=install_weak_deps=False`), and `wl-clipboard` or `xclip`
 lets `tmpmail copy` use the clipboard. It doesn't update by itself: install the next version's

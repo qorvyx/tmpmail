@@ -14,18 +14,17 @@
   let pane = $state<HTMLElement>();
   const links = $derived(m ? (allLinks ? m.links : m.links.slice(0, 1)) : []);
 
-  // While a message loads: whether a request to its provider waits out
-  // the provider's rate limit (asked once a second).
-  let retryIn = $state<number | null>(null);
+  // While a message loads: which provider the worker (one request at a
+  // time) is waiting out a rate limit for, and for how long (asked once a
+  // second).
+  let retryIn = $state<[string, number] | null>(null);
   const loading = $derived(app.openId !== null && app.opened === null);
-  const provider = $derived(inbox?.provider);
   $effect(() => {
-    const id = provider;
     retryIn = null;
-    if (!loading || !id) return;
+    if (!loading) return;
     let stop = false;
     const ask = () =>
-      api.rateLimit(id).then(
+      api.rateLimit().then(
         (s) => {
           if (!stop) retryIn = s;
         },
@@ -263,9 +262,9 @@
         <div class="h-3 w-48 rounded bg-sunken"></div>
       </div>
       <div class="h-24 rounded-xl bg-sunken"></div>
-      {#if retryIn !== null && provider}
+      {#if retryIn !== null}
         <p class="text-xs text-muted" role="status">
-          {app.providerName(provider)} is limiting requests; retrying in {retryIn} s.
+          {app.providerName(retryIn[0])} is limiting requests; retrying in {retryIn[1]} s.
         </p>
       {/if}
     </div>

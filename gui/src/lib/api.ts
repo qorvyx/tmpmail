@@ -81,7 +81,7 @@ export interface InboxView {
 export interface Summary {
   id: string;
   from: string;
-  /** The sender's display name (the core's `render::sender_name`). */
+  /** The sender's display name: cleaned of control and bidi characters, then the core's `render::sender_name`. */
   name: string;
   subject: string;
   intro: string;
@@ -115,7 +115,7 @@ export interface OpenedMessage {
   code: string | null;
   /** The sender's bare address (what "copy sender" copies). */
   sender: string;
-  /** The sender's display name (the core's `render::sender_name`). */
+  /** The sender's display name: cleaned of control and bidi characters, then the core's `render::sender_name`. */
   name: string;
   /** http(s) links, likely verification links first. */
   links: string[];
@@ -176,8 +176,8 @@ export const api = {
   settings: () => invoke<SettingsView>("settings"),
   saveSettings: (input: SettingsInput) => invoke<void>("save_settings", { input }),
   revealConfig: () => invoke<void>("reveal_config"),
-  /** Seconds until a request to `provider` tries again after its rate limit, or null. */
-  rateLimit: (provider: string) => invoke<number | null>("rate_limit", { provider }),
+  /** While the worker waits out a provider's rate limit: that provider's id and the seconds until it tries again; else null. */
+  rateLimit: () => invoke<[string, number] | null>("rate_limit"),
   /** The window's own theme (the Windows title bar) follows the app's switch. */
   setWindowTheme: (theme: "system" | "light" | "dark") =>
     invoke<"light" | "dark" | null>("set_window_theme", { theme }),

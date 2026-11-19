@@ -239,8 +239,9 @@ below it. Every inbox is checked in the background on the same schedule as `watc
 mail.tm and DropMail, polling elsewhere), so new mail appears on its own; the header shows
 `● live` when the selected inbox has a push connection. When a message contains a
 verification code, the preview shows it highlighted at the top and `y` copies it. While a
-message loads and a request to its provider waits out the provider's rate limit (it answered
-429 and tmpmail waits up to 30 s at a time to ask again), the preview says so: "Loading...
+message loads and the TUI's requests (sent one at a time) wait out a provider's rate limit (it
+answered 429 and tmpmail waits up to 30 s at a time to ask again), whether the message's own
+provider or one ahead of it, the preview says so: "Loading...
 mail.tm is limiting requests; retrying in N s.".
 
 | Key | Action |

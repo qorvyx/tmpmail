@@ -120,6 +120,9 @@ impl Watcher {
 
     /// Runs until the front end is gone or `rx` is closed.
     pub fn run<F: Front>(&mut self, rx: &Receiver<F::Req>, front: &mut F) {
+        // A message open waits behind this thread's requests, so its
+        // rate-limit sleeps are the ones a front end reports.
+        crate::http::mark_worker_thread();
         if !front.inboxes(&self.app) {
             return;
         }

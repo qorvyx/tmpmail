@@ -48,13 +48,17 @@ pub fn all() -> impl Iterator<Item = &'static str> {
     REGISTRY.iter().map(|(id, _, _)| *id)
 }
 
-/// While a request to provider `id` waits out that provider's rate limit
-/// before trying again (it answered 429): the seconds until it tries,
-/// rounded up (the longest such wait). So a screen can say why a message
-/// of that provider is slow to open. `None` otherwise.
-pub fn rate_limit_wait(id: &str) -> Option<u64> {
-    let wait = crate::http::rate_limit_sleep(id)?;
-    Some(wait.as_secs() + u64::from(wait.subsec_nanos() > 0))
+/// What holds a message open back in a front end (the TUI or the desktop
+/// app): its worker thread, which sends one request at a time, waiting out
+/// a provider's rate limit (it answered 429) before trying again. The
+/// waiting provider's id and the seconds until it tries (rounded up);
+/// `None` when the worker isn't waiting. Sleeps on other threads (push
+/// connections, the TUI's inline-image thread, the desktop app's
+/// background commands) don't count; requests the worker sends itself
+/// (in the desktop app, attachments and inline images too) do.
+pub fn rate_limit_hold() -> Option<(&'static str, u64)> {
+    let (p, d) = crate::http::worker_sleep()?;
+    Some((p, d.as_secs() + u64::from(d.subsec_nanos() > 0)))
 }
 
 /// A provider's display name ("mail.tm") by its id, without making the

@@ -49,42 +49,70 @@ fn record_retry_after(provider: &'static str, wait: Option<Duration>) {
 }
 
 /// Requests sleeping out a rate limit in [`Http::send`]'s own retries: the
-/// provider and when the sleep ends.
-static SLEEPING: Mutex<Vec<(&'static str, std::time::Instant)>> = Mutex::new(Vec::new());
+/// provider, when the sleep ends, and whether it is the front end's worker
+/// thread that sleeps (see [`mark_worker_thread`]).
+type Sleep = (&'static str, std::time::Instant, bool);
+static SLEEPING: Mutex<Vec<Sleep>> = Mutex::new(Vec::new());
 
-/// How long a request to `provider` is still sleeping out a rate limit
-/// before trying again (the longest, if several are), for a "trying again
-/// in N s" while a message of that provider loads. `None` when none is.
-pub(crate) fn rate_limit_sleep(provider: &str) -> Option<Duration> {
-    sleeps()
-        .into_iter()
-        .filter(|(p, _)| *p == provider)
-        .map(|(_, d)| d)
-        .max()
+thread_local! {
+    /// Set on the thread that runs a front end's [`crate::watcher::Watcher`].
+    static WORKER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks this thread as the front end's worker, or as one of the threads it
+/// waits for (its parallel domain lookups): the requests a message open
+/// waits behind, so their rate-limit sleeps are what [`worker_sleep`]
+/// reports.
+pub(crate) fn mark_worker_thread() {
+    WORKER.with(|w| w.set(true));
+}
+
+/// Whether this thread is (or works for) the front end's worker.
+pub(crate) fn is_worker_thread() -> bool {
+    WORKER.with(std::cell::Cell::get)
+}
+
+/// The worker's current rate-limit sleep, if any: the provider and the time
+/// left (the longest, if its parallel lookups sleep at once).
+pub(crate) fn worker_sleep() -> Option<(&'static str, Duration)> {
+    let now = std::time::Instant::now();
+    SLEEPING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .filter(|(_, _, worker)| *worker)
+        .map(|(p, until, _)| (*p, until.saturating_duration_since(now)))
+        .filter(|(_, d)| !d.is_zero())
+        .max_by_key(|(_, d)| *d)
 }
 
 /// Every request's rate-limit sleep: its provider and the time left.
+#[cfg(test)]
 fn sleeps() -> Vec<(&'static str, Duration)> {
     let now = std::time::Instant::now();
     SLEEPING
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .iter()
-        .map(|(p, until)| (*p, until.saturating_duration_since(now)))
+        .map(|(p, until, _)| (*p, until.saturating_duration_since(now)))
         .filter(|(_, d)| !d.is_zero())
         .collect()
 }
 
 /// Sleeps `wait`, listed in [`SLEEPING`] meanwhile.
 fn sleep_out(provider: &'static str, wait: Duration) {
-    let until = std::time::Instant::now() + wait;
+    let entry = (
+        provider,
+        std::time::Instant::now() + wait,
+        WORKER.with(std::cell::Cell::get),
+    );
     SLEEPING
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .push((provider, until));
+        .push(entry);
     sleep(wait);
     let mut all = SLEEPING.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(i) = all.iter().position(|e| *e == (provider, until)) {
+    if let Some(i) = all.iter().position(|e| *e == entry) {
         all.swap_remove(i);
     }
 }
@@ -466,7 +494,78 @@ mod tests {
         limited.assert();
         ok.assert();
         assert!(sleeps().iter().all(|(p, _)| *p != "sleep-test"));
-        assert_eq!(rate_limit_sleep("sleep-test"), None);
+    }
+
+    #[test]
+    fn only_the_worker_threads_sleep_holds_a_message_back() {
+        // Whether `provider`'s listed sleep is tagged as the worker's.
+        let tagged = |provider: &str| {
+            SLEEPING
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(p, _, _)| *p == provider)
+                .map(|(_, _, worker)| *worker)
+        };
+        let mut server = mockito::Server::new();
+        // One 429 then a 200 for each path; mockito answers with the first
+        // mock still missing hits.
+        let mocks: Vec<_> = ["/w-other", "/w-worker"]
+            .iter()
+            .flat_map(|path| {
+                [
+                    server
+                        .mock("GET", *path)
+                        .with_status(429)
+                        .with_header("retry-after", "1")
+                        .expect(1)
+                        .create(),
+                    server
+                        .mock("GET", *path)
+                        .with_status(200)
+                        .expect(1)
+                        .create(),
+                ]
+            })
+            .collect();
+        let base = server.url();
+        let run = |worker: bool| {
+            let url = format!("{base}/{}", if worker { "w-worker" } else { "w-other" });
+            std::thread::spawn(move || {
+                if worker {
+                    mark_worker_thread();
+                }
+                let http = Http::new(if worker { "hold-worker" } else { "hold-other" });
+                http.send(|| http.client().get(&url)).map(|r| r.status())
+            })
+        };
+        // A sleep on another thread (push, attachments) holds nothing.
+        let other = run(false);
+        let start = std::time::Instant::now();
+        while !sleeps().iter().any(|(p, _)| *p == "hold-other") {
+            assert!(start.elapsed() < Duration::from_secs(5), "never seen");
+            sleep(Duration::from_millis(20));
+        }
+        assert!(tagged("hold-other") == Some(false));
+        assert!(other.join().unwrap().unwrap().is_success());
+        // The worker's own sleep does, whatever its provider.
+        let worker = run(true);
+        let start = std::time::Instant::now();
+        let seen = loop {
+            if tagged("hold-worker") == Some(true) {
+                break worker_sleep().expect("a worker sleep");
+            }
+            assert!(start.elapsed() < Duration::from_secs(5), "never seen");
+            sleep(Duration::from_millis(20));
+        };
+        assert!(
+            seen.1 <= Duration::from_secs(1) || seen.0 != "hold-worker",
+            "{seen:?}"
+        );
+        assert!(worker.join().unwrap().unwrap().is_success());
+        for m in &mocks {
+            m.assert();
+        }
     }
 
     #[test]

@@ -1154,9 +1154,7 @@ impl Ui {
             }
             other => {
                 let text = match other {
-                    Preview::Loading => {
-                        Text::from(loading_text(self.inbox().map(|i| i.provider.as_str()))).dim()
-                    }
+                    Preview::Loading => Text::from(loading_text()).dim(),
                     Preview::Failed(e) => {
                         Text::from(format!("Could not load this message: {}", clean_line(e)))
                             .fg(Color::Red)
@@ -1308,11 +1306,10 @@ fn code_of(msg: &Message) -> Option<String> {
     extract::otp(&msg.subject, &message_body(msg), None)
 }
 
-/// The preview while a message of `provider` (by id) loads, with why it
-/// takes long when a request to that provider waits out its rate limit.
-fn loading_text(provider: Option<&str>) -> String {
-    let wait = provider.and_then(|id| crate::provider::rate_limit_wait(id).map(|s| (id, s)));
-    match wait {
+/// The preview while a message loads, with why it takes long when the
+/// worker (which sends one request at a time) waits out a rate limit.
+fn loading_text() -> String {
+    match crate::provider::rate_limit_hold() {
         Some((id, secs)) => format!(
             "Loading... {} is limiting requests; retrying in {secs} s.",
             crate::provider::name(id).unwrap_or(id)

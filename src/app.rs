@@ -725,12 +725,19 @@ fn order_by_domain(
     domain: &str,
     unavailable: &mut Vec<String>,
 ) -> Vec<Box<dyn Provider>> {
+    // Run for the front end's worker, the lookups hold its queue up too.
+    let worker = crate::http::is_worker_thread();
     let lists: Vec<Result<Vec<String>>> = std::thread::scope(|s| {
         let lookups: Vec<_> = candidates
             .iter()
             .map(|p| {
                 let id = p.id();
-                s.spawn(move || provider::get(id)?.domains())
+                s.spawn(move || {
+                    if worker {
+                        crate::http::mark_worker_thread();
+                    }
+                    provider::get(id)?.domains()
+                })
             })
             .collect();
         lookups

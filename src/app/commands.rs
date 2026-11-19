@@ -1060,8 +1060,12 @@ impl App {
     }
 
     fn delete(&mut self, a: DeleteArgs) -> Result<()> {
+        // Refused up front where the provider can't delete, also when there
+        // is nothing to delete (`--all` on an empty inbox).
+        let n = self.state.resolve(self.global.inbox.as_deref())?;
+        self.ensure_can_delete(n)?;
         let deleted = if a.all {
-            self.with_inbox(|p, inbox| {
+            self.with_inbox_at(n, |p, inbox| {
                 let list = p.list(inbox)?;
                 for s in &list {
                     p.delete_message(inbox, &s.id)?;
@@ -1963,6 +1967,30 @@ mod tests {
         assert!(matches!(err, Error::Unsupported { .. }), "{err}");
         assert!(err.to_string().contains("a@x.com"), "{err}");
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn delete_is_refused_where_deleting_is_unsupported_even_with_nothing_to_delete() {
+        // An empty inbox, so nothing reaches the provider's own refusal
+        // (`Fixed` never deletes: a listed message would be refused there).
+        // By id, the refusal comes before "message 1 not found".
+        for (mail, all) in [(vec![], true), (vec![], false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut app = app_with(
+                dir.path(),
+                Fixed {
+                    mail,
+                    deletes: false,
+                },
+            );
+            let args = DeleteArgs {
+                id: (!all).then(|| "1".to_string()),
+                all,
+            };
+            let err = app.run(Command::Delete(args)).unwrap_err();
+            assert!(matches!(err, Error::Unsupported { .. }), "{err}");
+            assert_eq!(err.exit_code(), 64);
+        }
     }
 
     #[test]

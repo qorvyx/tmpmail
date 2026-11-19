@@ -121,7 +121,7 @@ its inline images by `cid:` as other providers' mail does; any other `attachment
 | `links` | `{"links": [...], "message_id"}` |
 | `attachments` | `{"message_id", "attachments": [...]}` |
 | `save` | `{"saved": ["path", ...]}`, plus `"failed": [{"id", "filename", "error": {"kind", "message"}}]` when some attachments couldn't be saved and the others were tried (`filename` is the name it would have been saved as) (the exit code is then the first failure's, and no separate `error` document follows) |
-| `delete` | `{"deleted": N}` |
+| `delete` | `{"deleted": N}`; an `unsupported` error (exit 64) before anything else on a provider that can't delete messages (DropMail, tempmail.lol), also when the inbox is empty |
 | `drop` | `{"dropped": "address", "active": "address or null"}` |
 | `copy` | `{"copied": "address"}` |
 | `qr` | `{"address": "address"}` (no drawing) |

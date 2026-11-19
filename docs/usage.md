@@ -287,7 +287,8 @@ tmpmail save 1 -o ~/Downloads
 | `ID` | The message to delete. |
 | `--all` | Delete every message in the inbox. |
 
-Supported by mail.tm, mail.gw, Guerrilla and Maildrop.
+Supported by mail.tm, mail.gw, Guerrilla and Maildrop. On DropMail and tempmail.lol it is
+refused (exit 64, `--json` kind `unsupported`), also when the inbox is empty.
 
 ### `whoami`: show the address
 

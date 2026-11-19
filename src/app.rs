@@ -351,6 +351,19 @@ impl App {
     }
 
     #[cfg(feature = "cli")]
+    /// Refuses, before any request, deleting messages in inbox `n` when
+    /// its provider can't (`delete`, MCP `delete_message`; also with
+    /// nothing to delete).
+    #[cfg(feature = "cli")]
+    pub(crate) fn ensure_can_delete(&mut self, n: usize) -> Result<()> {
+        let id = self.state.inboxes[n].provider.clone();
+        if self.provider(&id)?.caps().delete_message {
+            Ok(())
+        } else {
+            Err(crate::error::unsupported(&id, "deleting messages"))
+        }
+    }
+
     fn current(&self) -> Result<&Inbox> {
         let n = self.state.resolve(self.global.inbox.as_deref())?;
         Ok(&self.state.inboxes[n])

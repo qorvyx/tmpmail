@@ -563,6 +563,7 @@ impl Server<'_> {
 
     fn delete_message(&mut self, a: DeleteMessageArgs) -> Result<Value> {
         let n = self.app.state.resolve(a.inbox.as_deref())?;
+        self.app.ensure_can_delete(n)?;
         let id = self.app.with_inbox_at(n, |p, inbox| {
             let id = App::resolve_id(p, inbox, Some(&a.id))?;
             p.delete_message(inbox, &id).map(|()| id)

@@ -104,14 +104,14 @@ For Debian and the systems built on it that use `apt`: Ubuntu, Linux Mint, Pop!_
 elementary OS, Zorin OS and others. The desktop app needs Debian 12 or Ubuntu 22.04 or later
 (or a system based on them).
 
-**Command-line tool:**
+#### ⌨️ Command-line tool
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-cli_0.3.7_amd64.deb
 sudo apt install ./tmpmail-cli_0.3.7_amd64.deb
 ```
 
-**Desktop app:**
+#### 🖥️ Desktop app
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-amd64.deb
@@ -124,14 +124,14 @@ For Fedora and the other systems that use `dnf`. The command-line tool also inst
 RHEL, CentOS Stream, Rocky Linux and AlmaLinux; the desktop app needs version 9 or later of
 those, with [EPEL](https://docs.fedoraproject.org/en-US/epel/) turned on.
 
-**Command-line tool:**
+#### ⌨️ Command-line tool
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-cli-0.3.7-1.x86_64.rpm
 sudo dnf install ./tmpmail-cli-0.3.7-1.x86_64.rpm
 ```
 
-**Desktop app:**
+#### 🖥️ Desktop app
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-x86_64.rpm
@@ -163,7 +163,9 @@ sudo dnf install ./tmpmail-desktop-0.1.6-x86_64.rpm
 
 ### Arch and other Linux
 
-**Command-line tool**, either with [Homebrew](https://brew.sh):
+#### ⌨️ Command-line tool
+
+Either with [Homebrew](https://brew.sh):
 
 ```sh
 brew install qorvyx/tap/tmpmail
@@ -184,7 +186,9 @@ once (bash; for zsh use `~/.zshrc`, and in fish run `fish_add_path ~/.local/bin`
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 ```
 
-**Desktop app:** the AppImage, which runs on its own.
+#### 🖥️ Desktop app
+
+The AppImage, which runs on its own:
 
 ```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-x86_64.AppImage
@@ -208,14 +212,23 @@ chmod +x tmpmail-desktop-0.1.6-x86_64.AppImage
 
 ### macOS
 
-Both with [Homebrew](https://brew.sh):
+#### ⌨️ Command-line tool
+
+With [Homebrew](https://brew.sh):
 
 ```sh
-brew install qorvyx/tap/tmpmail                  # command-line tool
-brew install --cask qorvyx/tap/tmpmail-desktop   # desktop app (macOS 11 or later)
+brew install qorvyx/tap/tmpmail
 ```
 
-The desktop app isn't notarized by Apple, so macOS refuses to open it the first time: open
+#### 🖥️ Desktop app
+
+With Homebrew (macOS 11 or later):
+
+```sh
+brew install --cask qorvyx/tap/tmpmail-desktop
+```
+
+The app isn't notarized by Apple, so macOS refuses to open it the first time: open
 it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
 macOS asks again after each update.
 
@@ -235,7 +248,7 @@ macOS asks again after each update.
 
 ### Windows
 
-**Command-line tool:**
+#### ⌨️ Command-line tool
 
 1. Download
    [`tmpmail-0.3.7-x86_64-pc-windows-msvc.zip`](https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-0.3.7-x86_64-pc-windows-msvc.zip)
@@ -248,7 +261,9 @@ macOS asks again after each update.
    Click **OK** twice.
 4. Open a new terminal and run `tmpmail --version` to check.
 
-**Desktop app:** download
+#### 🖥️ Desktop app
+
+Download
 [`tmpmail-desktop-0.1.6-x64-setup.exe`](https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-x64-setup.exe)
 and run it. The app isn't code-signed, so Windows warns:
 

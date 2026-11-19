@@ -105,6 +105,9 @@ when the provider marks it read itself.
 Prints the headers and body as text. Alias: `show`. Old flags: `-r` (newest), `tmpmail ID`.
 The hints it prints (`tmpmail save ID`, `tmpmail read ID --html`) include `-i ADDRESS` when
 the inbox isn't the active one (picked with `-i`, `TMPMAIL_INBOX`, or `wait -a`).
+mail.tm and mail.gw add an HTML copy of their own to a text-only mail (the text in paragraphs
+and line breaks); tmpmail leaves it out, so such a mail has no HTML body (`--json` `html` is
+`null`), as it was sent.
 
 | Option | Short | Explanation |
 |---|---|---|
@@ -265,6 +268,7 @@ hint that doesn't fit next to the message is left out whole rather than cut; `? 
 ### `attachments`: list attachments
 
 Shows each attachment's id, file name, type and size. Takes `ID` or `--recent`/`-r` like `read`.
+A name longer than 60 characters is cut with `…` (`--json` has it whole; `save` takes the id).
 Supported by mail.tm, mail.gw, DropMail and Guerrilla.
 
 ### `save`: download attachments

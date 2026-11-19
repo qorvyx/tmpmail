@@ -20,6 +20,7 @@ fn main() {
         "prepare_attachment",
         "drag_attachment",
         "rate_limit",
+        "set_window_theme",
         "probe_finish",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

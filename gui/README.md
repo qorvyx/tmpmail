@@ -115,7 +115,8 @@ a safe HTML preview in light or dark, and the TUI's actions and keys. Released o
   so. Unknown keys in `config.toml` show as an info notice (`tmpmail: unknown key …,
   ignored`) at start (held until the window is ready, so it isn't lost; 0.1.3 lost it),
   and after a save only for keys that are new since the last load.
-- **Look:** System / Light / Dark switch (remembered), resizable panes (remembered),
+- **Look:** System / Light / Dark switch (remembered; on Windows the title bar follows it),
+  resizable panes (remembered),
   keyboard focus rings, motion only on arrival of mail and dialogs, none with
   `prefers-reduced-motion`. The window opens at 1240×780, or smaller and centered when the
   primary screen's work area can't hold that, title bar included; its minimum size follows
@@ -315,7 +316,10 @@ The theme reaches the mail frame only through its URL (`?theme=dark`), never thr
 script, and Rust picks the colors when it builds the document:
 
 - Plain-text mail, and HTML mail that sets no colors of its own: drawn in the dark theme's
-  own background and text colors.
+  own background and text colors. Plain text keeps its line breaks and leading spaces, and
+  long lines wrap. mail.tm and mail.gw send an HTML copy they make of a text-only mail
+  (paragraphs and line breaks only, which drop the leading spaces); the core leaves that copy
+  out, so such a mail shows as the text it is.
 - HTML mail with its own colors (`bgcolor`, or `color` / `background` in a `style`,
   detected in the sanitized HTML by `render::has_own_colors`): drawn as mail clients do,
   with `filter: invert(1) hue-rotate(180deg)` on the document and the same filter again on

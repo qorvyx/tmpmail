@@ -194,6 +194,55 @@ fn format_addr(v: &Value) -> String {
 /// shown as an image ([`super::image_type`]). mail.tm writes these itself,
 /// always in that form; anything else (a link, the word in the text,
 /// another id) stays as it is.
+/// Whether `html` is only `text` in paragraphs and line breaks (what
+/// mail.tm and mail.gw make of a text-only mail): no other tag or
+/// attribute, and the same words, as far as both go (either may be cut at
+/// 100 KiB; the last word of the shorter one may be cut in two).
+fn is_text_copy(html: &str, text: &str) -> bool {
+    let mut plain = String::new();
+    let mut rest = html;
+    while let Some(at) = rest.find('<') {
+        plain.push_str(&rest[..at]);
+        let tail = &rest[at + 1..];
+        let Some(end) = tail.find('>') else {
+            return false;
+        };
+        let tag = tail[..end].trim();
+        if !["p", "/p", "br", "br/", "br /"]
+            .iter()
+            .any(|t| tag.eq_ignore_ascii_case(t))
+        {
+            return false;
+        }
+        plain.push(' ');
+        rest = &tail[end + 1..];
+    }
+    plain.push_str(rest);
+    let plain = plain
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&");
+    let (h, t): (Vec<&str>, Vec<&str>) = (
+        plain.split_whitespace().collect(),
+        text.split_whitespace().collect(),
+    );
+    let (short, long) = if h.len() <= t.len() {
+        (&h, &t)
+    } else {
+        (&t, &h)
+    };
+    let Some((_, whole)) = short.split_last() else {
+        return false;
+    };
+    long.starts_with(whole)
+        && short
+            .last()
+            .zip(long.get(whole.len()))
+            .is_some_and(|(a, b)| b.starts_with(a))
+}
+
 fn attachment_srcs_as_cids<'a>(html: &'a str, attachments: &[Attachment]) -> Cow<'a, str> {
     const SCHEME: &[u8] = b"attachment:";
     let images: Vec<&str> = attachments
@@ -413,6 +462,14 @@ impl Provider for MailTm {
             html,
             attachments,
         };
+        // A text-only mail comes with an HTML copy mail.tm made of it
+        // (`<p>` and `<br/>`), which loses the text's leading spaces: it
+        // isn't the sender's HTML. Checked before a cut body gets its note.
+        if let (Some(text), Some(html)) = (&msg.text, &msg.html)
+            && is_text_copy(html, text)
+        {
+            msg.html = None;
+        }
         self.whole_bodies(inbox, &mut msg);
         // After the check for a cut body, which goes by mail.tm's length.
         if let Some(html) = &msg.html {
@@ -565,6 +622,46 @@ mod tests {
     }
 
     #[test]
+    fn mail_tms_html_copy_of_a_text_mail_is_left_out() {
+        // What mail.tm sent for round 3's text-only mail.
+        let text =
+            "Just plain text.\nSecond line.\n\n    indented block\nhttps://example.org/plain";
+        let copy = "<p>Just plain text.<br/>Second line.</p><p>    indented block<br/>https://example.org/plain</p>";
+        let mut s = Server::new();
+        s.mock("GET", "/messages/m1")
+            .with_body(
+                json!({"id": "m1", "from": {"address": "a@b.c", "name": ""}, "to": [],
+                    "subject": "Plain text only", "text": text, "html": [copy],
+                    "createdAt": "2026-11-19T04:00:00+00:00"})
+                .to_string(),
+            )
+            .create();
+        let mut inbox = Inbox::new(
+            "mailtm",
+            "x@x.com".into(),
+            json!({"password":"pw","token":"t"}),
+        );
+        let msg = provider(&s).get(&mut inbox, "m1").unwrap();
+        assert_eq!(msg.html, None);
+        assert_eq!(msg.text.as_deref(), Some(text));
+
+        assert!(is_text_copy("<P>a &amp; b<BR>c<br />d</p>", "a & b\nc\nd"));
+        // Cut at 100 KiB, the HTML mid-word.
+        assert!(is_text_copy("<p>one two thr", "one two three four"));
+        for (html, text) in [
+            // The sender's own HTML.
+            ("<p>Hi <b>there</b></p>", "Hi there"),
+            ("<p class=\"x\">a</p>", "a"),
+            ("a < b", "a < b"),
+            // Paragraphs only, but saying something else than the text.
+            ("<p>Your code is 123456</p>", "View this mail in a browser"),
+            ("", "text"),
+        ] {
+            assert!(!is_text_copy(html, text), "{html}");
+        }
+    }
+
+    #[test]
     fn create_list_and_read() {
         let mut s = Server::new();
         s.mock("GET", "/domains")
@@ -592,7 +689,7 @@ mod tests {
         s.mock("GET", "/messages/m1")
             .with_body(
                 r#"{"id":"m1","from":{"address":"a@b.c","name":""},"to":[{"address":"otter1@maxxspace.com","name":""}],
-                "subject":"Hi","text":"Your code is 123456","html":["<p>Your code</p>"," is 123456"],
+                "subject":"Hi","text":"Your code is 123456","html":["<p>Your <b>code</b></p>"," is 123456"],
                 "createdAt":"2026-10-05T10:00:00+00:00",
                 "attachments":[{"id":"ATT1","filename":"a.txt","contentType":"text/plain","size":3,
                 "downloadUrl":"/messages/m1/attachment/ATT1"}]}"#,
@@ -615,7 +712,10 @@ mod tests {
         assert!(list[0].has_attachments);
 
         let msg = p.get(&mut inbox, "m1").unwrap();
-        assert_eq!(msg.html.as_deref(), Some("<p>Your code</p> is 123456"));
+        assert_eq!(
+            msg.html.as_deref(),
+            Some("<p>Your <b>code</b></p> is 123456")
+        );
         assert_eq!(msg.to, vec!["otter1@maxxspace.com"]);
         assert_eq!(msg.attachments[0].size, Some(3 * 1024));
         assert_eq!(

@@ -25,6 +25,7 @@
     "allow-prepare-attachment",
     "allow-drag-attachment",
     "allow-rate-limit",
+    "allow-set-window-theme",
     "allow-probe-finish"
   ]
 }

@@ -490,6 +490,7 @@ fn main() {
         commands::prepare_attachment,
         commands::drag_attachment,
         commands::rate_limit,
+        commands::set_window_theme,
         probe::probe_finish
     ]);
     #[cfg(not(debug_assertions))]
@@ -511,7 +512,8 @@ fn main() {
         commands::reveal_config,
         commands::prepare_attachment,
         commands::drag_attachment,
-        commands::rate_limit
+        commands::rate_limit,
+        commands::set_window_theme
     ]);
 
     // Every call passes the caller check first: only the app's page in the

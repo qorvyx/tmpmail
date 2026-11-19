@@ -954,18 +954,7 @@ impl App {
         if msg.attachments.is_empty() {
             println!("No attachments.");
         }
-        let rows: Vec<[String; 4]> = msg
-            .attachments
-            .iter()
-            .map(|att| {
-                [
-                    clean_line(&att.id),
-                    clean_line(&att.filename),
-                    clean_line(&att.content_type),
-                    att.size.map(human_size).unwrap_or_default(),
-                ]
-            })
-            .collect();
+        let rows = attachment_rows(&msg.attachments);
         let [iw, fw, tw, sw] = column_widths(&rows);
         for [id, file, kind, size] in &rows {
             println!(
@@ -1396,6 +1385,26 @@ fn summary_line(s: &Summary) -> String {
 
 fn term_width() -> usize {
     system::term_size().map_or(100, |(cols, _)| cols)
+}
+
+/// The widest an attachment name is shown in `attachments`, in characters.
+const MAX_NAME_COLUMN: usize = 60;
+
+/// `attachments`' rows: id, name, type, size, cleaned. A name past
+/// [`MAX_NAME_COLUMN`] is cut with `…`, so one long name doesn't push
+/// every row's type and size off (`--json` has it whole).
+fn attachment_rows(attachments: &[crate::provider::Attachment]) -> Vec<[String; 4]> {
+    attachments
+        .iter()
+        .map(|att| {
+            [
+                clean_line(&att.id),
+                truncate(&clean_line(&att.filename), MAX_NAME_COLUMN),
+                clean_line(&att.content_type),
+                att.size.map(human_size).unwrap_or_default(),
+            ]
+        })
+        .collect()
 }
 
 /// Widest cell of each column, in characters.
@@ -2021,6 +2030,22 @@ mod tests {
         assert!(matches!(err, Error::Unsupported { .. }), "{err}");
         assert!(err.to_string().contains("a@x.com"), "{err}");
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_long_attachment_name_is_cut_in_the_list() {
+        let att = |name: &str| Attachment {
+            id: "1".into(),
+            filename: name.into(),
+            content_type: "text/plain".into(),
+            size: Some(10),
+            url: None,
+        };
+        let rows = attachment_rows(&[att(&format!("{}.txt", "L".repeat(240))), att("a.pdf")]);
+        assert_eq!(rows[0][1].chars().count(), MAX_NAME_COLUMN);
+        assert!(rows[0][1].ends_with('…'));
+        assert_eq!(rows[1][1], "a.pdf");
+        assert_eq!(column_widths(&rows)[1], MAX_NAME_COLUMN);
     }
 
     #[test]

@@ -410,6 +410,43 @@ pub async fn rate_limit() -> Option<Value> {
         .map(|(name, seconds)| json!({ "provider": name, "seconds": seconds }))
 }
 
+/// The window's own theme (Windows: its title bar) follows the app's
+/// switch: "light", "dark", or "system" (the system's). Other systems
+/// keep theirs: on Linux GTK's setting would override the system's dark
+/// preference for the page too, and macOS follows the system.
+///
+/// Windows hands the window's theme to the page too (WebView2's
+/// `prefers-color-scheme`), so the answer is the window's theme now
+/// ("light" or "dark"; with "system", the system's), for the page to tell
+/// the system's theme by. Elsewhere `None`.
+#[tauri::command]
+pub fn set_window_theme(window: WebviewWindow, theme: String) -> Result<Option<String>, String> {
+    let theme = match theme.as_str() {
+        "light" => Some(tauri::Theme::Light),
+        "dark" => Some(tauri::Theme::Dark),
+        "system" => None,
+        _ => return Err("unknown theme".into()),
+    };
+    #[cfg(windows)]
+    {
+        window.set_theme(theme).map_err(|e| e.to_string())?;
+        let now = window.theme().map_err(|e| e.to_string())?;
+        Ok(Some(
+            if now == tauri::Theme::Dark {
+                "dark"
+            } else {
+                "light"
+            }
+            .to_string(),
+        ))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, theme);
+        Ok(None)
+    }
+}
+
 /// Where the Save dialog starts: the folder of the last save in this run,
 /// else Downloads, else home, rather than the dialog's own default (on
 /// Windows the install folder, next to the CLI's state). Only a folder that

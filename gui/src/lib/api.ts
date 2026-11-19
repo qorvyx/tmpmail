@@ -174,6 +174,9 @@ export const api = {
   revealConfig: () => invoke<void>("reveal_config"),
   /** A provider rate-limiting a request, and the seconds until it tries again; or null. */
   rateLimit: () => invoke<{ provider: string; seconds: number } | null>("rate_limit"),
+  /** The window's own theme (the Windows title bar) follows the app's switch. */
+  setWindowTheme: (theme: "system" | "light" | "dark") =>
+    invoke<"light" | "dark" | null>("set_window_theme", { theme }),
   prepareAttachment: (key: number, index: number) => invoke<void>("prepare_attachment", { key, index }),
   dragAttachment: (key: number, index: number) => invoke<void>("drag_attachment", { key, index }),
   probeFinish: () => invoke<void>("probe_finish"),

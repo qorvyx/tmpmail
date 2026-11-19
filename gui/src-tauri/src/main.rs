@@ -363,7 +363,69 @@ fn plain_mailto(url: &Url) -> Option<String> {
     Some(out)
 }
 
+/// What the command line asks for before anything starts: `--version` /
+/// `-V`, `--help` / `-h`, or an option it doesn't know. Only as the first
+/// argument, the app's only one (Windows starts it with a notification's
+/// link instead, old macOS adds `-psn_…`).
+#[derive(Debug, PartialEq)]
+enum Asked {
+    Version,
+    Help,
+    Unknown,
+}
+
+fn asked(first: Option<&str>) -> Option<Asked> {
+    match first? {
+        "--version" | "-V" => Some(Asked::Version),
+        "--help" | "-h" => Some(Asked::Help),
+        a if a.starts_with('-') && !a.starts_with("-psn_") => Some(Asked::Unknown),
+        _ => None,
+    }
+}
+
+const USAGE: &str = "Usage: tmpmail-gui [-V | --version | -h | --help]";
+
+/// Answers `--version`, `--help` or an unknown option, then exits.
+/// Windows: a release build has no console of its own, so it writes to the
+/// one it was started from, if any.
+fn answer(asked: Asked) -> ! {
+    use std::io::Write;
+    #[cfg(windows)]
+    // SAFETY: attaches this process to its parent's console, if it has one;
+    // a failure only means nothing is shown.
+    unsafe {
+        use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+    let version = env!("CARGO_PKG_VERSION");
+    // Written, not printed: a closed pipe isn't a panic.
+    let code = match asked {
+        Asked::Version => {
+            let _ = writeln!(std::io::stdout(), "tmpmail-gui {version}");
+            0
+        }
+        Asked::Help => {
+            let _ = writeln!(
+                std::io::stdout(),
+                "tmpmail-gui {version}: the tmpmail desktop app.\n\n{USAGE}\n\n\
+                 It opens a window; inboxes and settings are shared with the `tmpmail`\n\
+                 command-line tool. See https://github.com/qorvyx/tmpmail"
+            );
+            0
+        }
+        Asked::Unknown => {
+            let _ = writeln!(std::io::stderr(), "tmpmail-gui: unknown option\n{USAGE}");
+            2
+        }
+    };
+    std::process::exit(code)
+}
+
 fn main() {
+    let first = std::env::args_os().nth(1);
+    if let Some(asked) = asked(first.as_deref().and_then(|a| a.to_str())) {
+        answer(asked);
+    }
     // First, while no other thread runs, and before GTK and WebKit start:
     // the AppImage's WebKit can't draw COLRv1 color fonts (see `fonts`).
     #[cfg(target_os = "linux")]
@@ -373,6 +435,19 @@ fn main() {
     // back to the application name, and that to the program name).
     #[cfg(target_os = "linux")]
     gtk::glib::set_prgname(Some(PROGRAM));
+    // Without a display GTK can't start, and the event loop would panic:
+    // one clear line instead.
+    #[cfg(target_os = "linux")]
+    if gtk::init().is_err() {
+        let var = |name: &str| std::env::var(name).unwrap_or_else(|_| "unset".into());
+        eprintln!(
+            "tmpmail-gui: can't connect to a display (DISPLAY={}, WAYLAND_DISPLAY={}); the \
+             desktop app needs a graphical session",
+            clean_line(&var("DISPLAY")),
+            clean_line(&var("WAYLAND_DISPLAY"))
+        );
+        std::process::exit(1);
+    }
     #[cfg(debug_assertions)]
     let probe = probe::Probe::from_env();
     #[cfg(debug_assertions)]
@@ -645,6 +720,24 @@ fn main() {
 mod tests {
     use super::*;
     use tmpmail::provider::{InlineLookup, InlineStep};
+
+    #[test]
+    fn version_and_help_are_answered_before_anything_starts() {
+        assert_eq!(asked(Some("--version")), Some(Asked::Version));
+        assert_eq!(asked(Some("-V")), Some(Asked::Version));
+        assert_eq!(asked(Some("--help")), Some(Asked::Help));
+        assert_eq!(asked(Some("-h")), Some(Asked::Help));
+        for other in [
+            None,
+            Some("tmpmail-desktop://open?inbox=a%40b.c"),
+            Some("-psn_0_1"),
+        ] {
+            assert_eq!(asked(other), None, "{other:?}");
+        }
+        for typo in ["-v", "--verison", "--version=1", "--Help"] {
+            assert_eq!(asked(Some(typo)), Some(Asked::Unknown), "{typo}");
+        }
+    }
 
     #[test]
     fn opened_mail_links_and_code_are_shown_as_ascii_and_clean() {

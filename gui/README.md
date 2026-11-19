@@ -166,6 +166,11 @@ wheel or the scrollbar.
 | `?` | Shortcut help |
 | `Ctrl+,` / `Cmd+,` | Settings |
 
+`tmpmail-gui --version` (or `-V`) prints the app's version and `--help` (or `-h`) a short
+usage, without opening a window or needing a display (on Windows, in the console it was
+started from); another option is refused with the usage (exit code 2). Started on Linux
+without a display, it says so in one line and exits with code 1.
+
 ## Where settings are kept
 
 - The provider order (`providers`), `poll_interval`, `push` and `http_timeout` are the CLI's

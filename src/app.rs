@@ -350,7 +350,6 @@ impl App {
         Ok((0..self.state.inboxes.len()).collect())
     }
 
-    #[cfg(feature = "cli")]
     /// Refuses, before any request, deleting messages in inbox `n` when
     /// its provider can't (`delete`, MCP `delete_message`; also with
     /// nothing to delete).
@@ -364,6 +363,7 @@ impl App {
         }
     }
 
+    #[cfg(feature = "cli")]
     fn current(&self) -> Result<&Inbox> {
         let n = self.state.resolve(self.global.inbox.as_deref())?;
         Ok(&self.state.inboxes[n])

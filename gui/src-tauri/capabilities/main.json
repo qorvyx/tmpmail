@@ -24,6 +24,7 @@
     "allow-reveal-config",
     "allow-prepare-attachment",
     "allow-drag-attachment",
+    "allow-rate-limit",
     "allow-probe-finish"
   ]
 }

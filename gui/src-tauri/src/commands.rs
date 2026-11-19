@@ -400,6 +400,16 @@ pub async fn save_attachment(
     .map_err(|e| e.to_string())?
 }
 
+/// While a request waits out a provider's rate limit before trying again,
+/// that provider's name and the seconds until it tries (rounded up), so
+/// the page can say why a message takes long to open. Reads a note the
+/// core keeps; no request.
+#[tauri::command]
+pub async fn rate_limit() -> Option<Value> {
+    provider::rate_limit_wait()
+        .map(|(name, seconds)| json!({ "provider": name, "seconds": seconds }))
+}
+
 /// Where the Save dialog starts: the folder of the last save in this run,
 /// else Downloads, else home, rather than the dialog's own default (on
 /// Windows the install folder, next to the CLI's state). Only a folder that

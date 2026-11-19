@@ -48,6 +48,43 @@ fn record_retry_after(provider: &'static str, wait: Option<Duration>) {
     }
 }
 
+/// Requests sleeping out a rate limit in [`Http::send`]'s own retries: the
+/// provider and when the sleep ends.
+static SLEEPING: Mutex<Vec<(&'static str, std::time::Instant)>> = Mutex::new(Vec::new());
+
+/// The provider a request is sleeping out a rate limit for, and how long
+/// until it tries again (the longest such sleep), for a "trying again in
+/// N s" while a message loads. `None` when no request sleeps.
+pub(crate) fn rate_limit_sleep() -> Option<(&'static str, Duration)> {
+    sleeps().into_iter().max_by_key(|(_, d)| *d)
+}
+
+/// Every request's rate-limit sleep: its provider and the time left.
+fn sleeps() -> Vec<(&'static str, Duration)> {
+    let now = std::time::Instant::now();
+    SLEEPING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .map(|(p, until)| (*p, until.saturating_duration_since(now)))
+        .filter(|(_, d)| !d.is_zero())
+        .collect()
+}
+
+/// Sleeps `wait`, listed in [`SLEEPING`] meanwhile.
+fn sleep_out(provider: &'static str, wait: Duration) {
+    let until = std::time::Instant::now() + wait;
+    SLEEPING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push((provider, until));
+    sleep(wait);
+    let mut all = SLEEPING.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(i) = all.iter().position(|e| *e == (provider, until)) {
+        all.swap_remove(i);
+    }
+}
+
 fn has_retry_after(provider: &str) -> bool {
     RETRY_AFTER
         .lock()
@@ -153,7 +190,7 @@ impl Http {
             if status == StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
                 attempt += 1;
                 let wait = retry_after_header(&resp).unwrap_or(1 << attempt).min(30);
-                sleep(Duration::from_secs(wait));
+                sleep_out(self.provider, Duration::from_secs(wait));
                 continue;
             }
             if status == StatusCode::TOO_MANY_REQUESTS {
@@ -390,6 +427,43 @@ fn snippet(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_sleeping_out_a_rate_limit_can_be_seen() {
+        let mut server = mockito::Server::new();
+        // Both made up front: mockito answers with the first one still
+        // missing hits, so the 429 once, then the 200.
+        let limited = server
+            .mock("GET", "/y")
+            .with_status(429)
+            .with_header("retry-after", "1")
+            .expect(1)
+            .create();
+        let ok = server.mock("GET", "/y").with_status(200).create();
+        let url = format!("{}/y", server.url());
+        let request = std::thread::spawn(move || {
+            let http = Http::new("sleep-test");
+            http.send(|| http.client().get(&url)).map(|r| r.status())
+        });
+        let start = std::time::Instant::now();
+        let seen = loop {
+            // Other tests may sleep out their own 429s meanwhile.
+            if let Some(found) = sleeps().into_iter().find(|(p, _)| *p == "sleep-test") {
+                break found.1;
+            }
+            assert!(start.elapsed() < Duration::from_secs(5), "never seen");
+            sleep(Duration::from_millis(20));
+        };
+        assert!(
+            seen <= Duration::from_secs(1) && seen > Duration::ZERO,
+            "{seen:?}"
+        );
+        assert!(request.join().unwrap().unwrap().is_success());
+        limited.assert();
+        ok.assert();
+        assert!(sleeps().iter().all(|(p, _)| *p != "sleep-test"));
+        assert!(rate_limit_sleep().is_none_or(|(p, _)| p != "sleep-test"));
+    }
 
     #[test]
     fn a_rate_limit_that_outlasts_the_retries_keeps_its_retry_after() {

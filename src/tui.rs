@@ -1154,7 +1154,7 @@ impl Ui {
             }
             other => {
                 let text = match other {
-                    Preview::Loading => Text::from("Loading...").dim(),
+                    Preview::Loading => Text::from(loading_text()).dim(),
                     Preview::Failed(e) => {
                         Text::from(format!("Could not load this message: {}", clean_line(e)))
                             .fg(Color::Red)
@@ -1304,6 +1304,17 @@ fn fit(s: &str, cells: usize) -> String {
 /// The detected verification code, if the message has one.
 fn code_of(msg: &Message) -> Option<String> {
     extract::otp(&msg.subject, &message_body(msg), None)
+}
+
+/// The preview while a message loads, with why it takes long when a
+/// request waits out a provider's rate limit.
+fn loading_text() -> String {
+    match crate::provider::rate_limit_wait() {
+        Some((name, secs)) => {
+            format!("Loading... {name} is limiting requests; trying again in {secs} s.")
+        }
+        None => "Loading...".to_string(),
+    }
 }
 
 /// Headers, the code strip (when there is a code), attachments and body.

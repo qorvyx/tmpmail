@@ -19,6 +19,7 @@ fn main() {
         "reveal_config",
         "prepare_attachment",
         "drag_attachment",
+        "rate_limit",
         "probe_finish",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

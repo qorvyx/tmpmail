@@ -41,6 +41,17 @@ pub fn all() -> impl Iterator<Item = &'static str> {
     REGISTRY.iter().map(|(id, _)| *id)
 }
 
+/// While a request waits out a provider's rate limit before trying again
+/// (the provider answered 429): that provider's name and the seconds until
+/// it tries, rounded up. The TUI and the desktop app run their requests
+/// one at a time, so this is why a message is slow to open. `None`
+/// otherwise.
+pub fn rate_limit_wait() -> Option<(&'static str, u64)> {
+    let (id, wait) = crate::http::rate_limit_sleep()?;
+    let name = get(id).map_or(id, |p| p.name());
+    Some((name, wait.as_secs() + u64::from(wait.subsec_nanos() > 0)))
+}
+
 pub fn get(id: &str) -> Result<Box<dyn Provider>> {
     match REGISTRY.iter().find(|(known, _)| *known == id) {
         Some((_, make)) => Ok(Box::new(Decoded(make()))),

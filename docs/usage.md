@@ -235,7 +235,11 @@ Your inboxes on the left, the selected inbox's mail at the top right and the sel
 below it. Every inbox is checked in the background on the same schedule as `watch` (push on
 mail.tm and DropMail, polling elsewhere), so new mail appears on its own; the header shows
 `● live` when the selected inbox has a push connection. When a message contains a
-verification code, the preview shows it highlighted at the top and `y` copies it.
+verification code, the preview shows it highlighted at the top and `y` copies it. While a
+message loads and a provider is rate-limiting tmpmail (it answered 429 and tmpmail waits up
+to 30 s at a time to ask again; the TUI makes one request at a time, so any inbox's can hold
+the message back), the preview says so: "Loading... mail.tm is limiting requests; trying
+again in N s.".
 
 | Key | Action |
 |---|---|

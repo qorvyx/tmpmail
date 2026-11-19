@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fileKind, fileSize, initial, senderName } from "./api";
+  import { api, fileKind, fileSize, initial, senderName } from "./api";
   import CodeBanner from "./CodeBanner.svelte";
   import Icon from "./Icon.svelte";
   import Preview from "./Preview.svelte";
@@ -13,6 +13,30 @@
   let allLinks = $state(false);
   let pane = $state<HTMLElement>();
   const links = $derived(m ? (allLinks ? m.links : m.links.slice(0, 1)) : []);
+
+  // While a message loads: whether a provider is rate-limiting a request
+  // and the worker waits to try again (asked once a second). The worker
+  // runs one request at a time, so that is what holds the message back.
+  let limited = $state<{ provider: string; seconds: number } | null>(null);
+  const loading = $derived(app.openId !== null && app.opened === null);
+  $effect(() => {
+    limited = null;
+    if (!loading) return;
+    let stop = false;
+    const ask = () =>
+      api.rateLimit().then(
+        (r) => {
+          if (!stop) limited = r;
+        },
+        () => {},
+      );
+    void ask();
+    const timer = window.setInterval(() => void ask(), 1000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  });
 
   $effect(() => {
     void m?.key;
@@ -238,6 +262,11 @@
         <div class="h-3 w-48 rounded bg-sunken"></div>
       </div>
       <div class="h-24 rounded-xl bg-sunken"></div>
+      {#if limited}
+        <p class="text-xs text-muted" role="status">
+          {limited.provider} is limiting requests; trying again in {limited.seconds} s.
+        </p>
+      {/if}
     </div>
   {:else}
     <div class="grid h-full place-items-center p-8 text-center text-muted">

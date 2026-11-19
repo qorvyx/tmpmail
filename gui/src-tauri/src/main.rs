@@ -489,6 +489,7 @@ fn main() {
         commands::reveal_config,
         commands::prepare_attachment,
         commands::drag_attachment,
+        commands::rate_limit,
         probe::probe_finish
     ]);
     #[cfg(not(debug_assertions))]
@@ -509,7 +510,8 @@ fn main() {
         commands::save_settings,
         commands::reveal_config,
         commands::prepare_attachment,
-        commands::drag_attachment
+        commands::drag_attachment,
+        commands::rate_limit
     ]);
 
     // Every call passes the caller check first: only the app's page in the

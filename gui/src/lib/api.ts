@@ -172,6 +172,8 @@ export const api = {
   settings: () => invoke<SettingsView>("settings"),
   saveSettings: (input: SettingsInput) => invoke<void>("save_settings", { input }),
   revealConfig: () => invoke<void>("reveal_config"),
+  /** A provider rate-limiting a request, and the seconds until it tries again; or null. */
+  rateLimit: () => invoke<{ provider: string; seconds: number } | null>("rate_limit"),
   prepareAttachment: (key: number, index: number) => invoke<void>("prepare_attachment", { key, index }),
   dragAttachment: (key: number, index: number) => invoke<void>("drag_attachment", { key, index }),
   probeFinish: () => invoke<void>("probe_finish"),

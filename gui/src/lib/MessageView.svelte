@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fileKind, fileSize, senderName } from "./api";
+  import { fileKind, fileSize, initial, senderName } from "./api";
   import CodeBanner from "./CodeBanner.svelte";
   import Icon from "./Icon.svelte";
   import Preview from "./Preview.svelte";
@@ -7,6 +7,7 @@
   import { theme } from "./theme.svelte";
 
   const m = $derived(app.openedMessage);
+  const name = $derived(m ? senderName(m.from) : "");
   const inbox = $derived(app.current);
   const caps = $derived(inbox ? app.provider(inbox.provider)?.caps : undefined);
   let allLinks = $state(false);
@@ -49,15 +50,15 @@
         <div class="mt-3 flex flex-wrap items-center gap-x-3 @sm:flex-nowrap">
           <span
             class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-sunken text-sm font-bold text-muted"
-            aria-hidden="true">{senderName(m.from).trim().charAt(0).toUpperCase() || "?"}</span
+            aria-hidden="true">{initial(name)}</span
           >
           <div class="min-w-0 flex-1">
             <!-- A narrow pane: the address (with its copy button) wraps
                  under the name instead of both being cut to a few letters. -->
             <p class="flex min-w-0 flex-wrap items-baseline gap-x-2 @sm:flex-nowrap">
-              <span class="selectable max-w-full truncate text-sm font-semibold" title={m.from}>{senderName(m.from)}</span>
+              <span class="selectable max-w-full truncate text-sm font-semibold" title={m.from}>{name}</span>
               <span class="flex min-w-0 max-w-full items-baseline gap-2">
-                {#if m.sender !== senderName(m.from)}
+                {#if m.sender !== name}
                   <span class="selectable truncate text-xs text-muted">{m.sender}</span>
                 {/if}
                 <button

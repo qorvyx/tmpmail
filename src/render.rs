@@ -1256,6 +1256,29 @@ pub fn escape_html(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// The display name of a `From`: `GitHub` for `GitHub <noreply@github.com>`
+/// (quotes and spaces trimmed), the address for `<a@b.c>` or a name that is
+/// only quotes or spaces, and `from` as it is (trimmed) when it doesn't end
+/// in an `<address>`. The address is the last `<…>`, so a name with a `<`
+/// of its own (`<b>Bank</b> <hello@x.com>`) is kept whole. Not cleaned:
+/// callers run [`clean_line`] first.
+pub fn sender_name(from: &str) -> String {
+    let from = from.trim();
+    let Some((name, address)) = from
+        .strip_suffix('>')
+        .and_then(|rest| rest.rsplit_once('<'))
+        .filter(|(_, address)| address.contains('@'))
+    else {
+        return from.to_string();
+    };
+    let name = name.trim().trim_matches('"').trim();
+    if name.is_empty() {
+        address.trim().to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 /// The longest name [`safe_filename`] gives, in bytes: well under the 255
 /// of most file systems, with room for the ` (9999)` a saver adds to a
 /// name that is taken, and for a folder path in front (Windows programs
@@ -1534,6 +1557,23 @@ mod tests {
     fn html_to_text_keeps_content() {
         let t = html_to_text("<p>Your code is <b>123456</b></p>", 80);
         assert!(t.contains("123456"), "{t}");
+    }
+
+    #[test]
+    fn sender_names() {
+        for (from, name) in [
+            ("GitHub <noreply@github.com>", "GitHub"),
+            ("\"Acme Inc\" <a@acme.io>", "Acme Inc"),
+            ("<a@b.c>", "a@b.c"),
+            ("a@b.c", "a@b.c"),
+            ("\"   \" <a@b.c>", "a@b.c"),
+            ("<b>Bank</b> KCAB red <hello@x.com>", "<b>Bank</b> KCAB red"),
+            ("bank@x.com (We <3 you)", "bank@x.com (We <3 you)"),
+            ("Bob <a@b> trailing", "Bob <a@b> trailing"),
+            ("  Zoë <z@x.org>  ", "Zoë"),
+        ] {
+            assert_eq!(sender_name(from), name, "{from:?}");
+        }
     }
 
     #[test]

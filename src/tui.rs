@@ -19,7 +19,7 @@ use crate::cli::Global;
 use crate::error::Result;
 use crate::extract;
 use crate::provider::{Inbox, Message, Summary};
-use crate::render::{body_text, clean, clean_line};
+use crate::render::{body_text, clean, clean_line, sender_name};
 use crate::system;
 use crate::watcher::{self, Watcher};
 
@@ -1110,7 +1110,7 @@ impl Ui {
                 };
                 let when = s.date.map(relative).unwrap_or_default();
                 let from_w = (width / 4).clamp(10, 28);
-                let from = crate::app::truncate(&clean_line(&sender_name(&s.from)), from_w);
+                let from = crate::app::truncate(&sender_name(&clean_line(&s.from)), from_w);
                 let subject_style = if s.seen {
                     Style::new()
                 } else {
@@ -1306,14 +1306,6 @@ fn code_of(msg: &Message) -> Option<String> {
     extract::otp(&msg.subject, &message_body(msg), None)
 }
 
-/// `Name <addr>` -> `Name`; a bare address stays as is.
-fn sender_name(from: &str) -> String {
-    match from.split_once('<') {
-        Some((name, _)) if !name.trim().is_empty() => name.trim().trim_matches('"').to_string(),
-        _ => from.trim_matches(|c| c == '<' || c == '>').to_string(),
-    }
-}
-
 /// Headers, the code strip (when there is a code), attachments and body.
 fn render_message(msg: &Message, width: u16) -> Text<'static> {
     let key = |k: &str| Span::styled(format!("{k:<9}"), Style::new().dim());
@@ -1489,14 +1481,6 @@ fn draw_picker(f: &mut Frame, state: &mut ListState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sender_names() {
-        assert_eq!(sender_name("GitHub <noreply@github.com>"), "GitHub");
-        assert_eq!(sender_name("\"Acme Inc\" <a@acme.io>"), "Acme Inc");
-        assert_eq!(sender_name("<a@b.c>"), "a@b.c");
-        assert_eq!(sender_name("a@b.c"), "a@b.c");
-    }
 
     #[test]
     fn the_code_strip_shows_up_for_codes_only() {

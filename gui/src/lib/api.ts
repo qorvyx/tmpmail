@@ -197,10 +197,26 @@ export function until(iso: string | null, now = Date.now()): string | null {
   return `in ${Math.floor(secs / 86400)}d`;
 }
 
-/// The display name of "Name <addr>", else the address.
+/// The display name of "Name <addr>", else the address: the same rules
+/// as the core's `render::sender_name` (the TUI, notifications). The
+/// address is the last <…>, so a name may have a "<" of its own. No regex:
+/// a sender's long runs of spaces can't make it slow.
 export function senderName(from: string): string {
-  const m = /^\s*"?([^"<]*?)"?\s*<[^>]+>\s*$/.exec(from);
-  return m?.[1] ? m[1] : from;
+  const f = from.trim();
+  const open = f.lastIndexOf("<");
+  if (!f.endsWith(">") || open < 0) return f;
+  const address = f.slice(open + 1, -1);
+  if (!address.includes("@")) return f;
+  const name = f.slice(0, open).trim().replace(/^"+|"+$/g, "").trim();
+  return name || address.trim();
+}
+
+/// The avatar's letter: the first letter or digit of the sender's name,
+/// past any tag-like `<…>` in it (`<i>Acme</i>` gets "A"), as one
+/// upper-case character; "?" if there is none.
+export function initial(name: string): string {
+  const m = /[\p{L}\p{N}]/u.exec(name.replace(/<[^<>]*>/g, "")) ?? /[\p{L}\p{N}]/u.exec(name);
+  return m ? ([...m[0].toUpperCase()][0] ?? "?") : "?";
 }
 
 export function fileSize(bytes: number | null): string {

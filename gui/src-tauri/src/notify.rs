@@ -175,20 +175,10 @@ fn code_of(s: &Summary) -> Option<String> {
     extract::otp(&s.subject, &s.intro, None).map(|c| cap(&clean_line(&c), CODE_MAX))
 }
 
-/// "GitHub" for `GitHub <noreply@github.com>`, else the address, cleaned.
+/// "GitHub" for `GitHub <noreply@github.com>`, else the address, cleaned
+/// (the core's [`tmpmail::render::sender_name`], as the TUI shows it).
 pub fn sender_name(from: &str) -> String {
-    let from = clean_line(from);
-    let name = from
-        .rsplit_once('<')
-        .map(|(name, _)| name.trim().trim_matches('"').trim())
-        .filter(|n| !n.is_empty());
-    match name {
-        Some(n) => n.to_string(),
-        None => from
-            .trim_matches(|c| c == '<' || c == '>')
-            .trim()
-            .to_string(),
-    }
+    tmpmail::render::sender_name(&clean_line(from))
 }
 
 /// At most `max` characters, with an ellipsis when cut.

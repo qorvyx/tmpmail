@@ -10,6 +10,8 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 
 ## What's new in 0.1.5
 
+- **Security: HTML sanitizer updated** to ammonia 4.2.5, which fixes a mutation XSS through
+  embedded SVG and MathML (RUSTSEC-2026-0533).
 - **Homebrew cask for macOS.** On macOS 11 or later,
   `brew install --cask qorvyx/tap/tmpmail-desktop` installs the app from the release's DMG, and `brew upgrade --cask` updates it. The app is still
   ad-hoc signed and not notarized, so macOS asks once through System Settings → Privacy &

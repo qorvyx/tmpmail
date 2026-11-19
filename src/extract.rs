@@ -62,20 +62,21 @@ pub fn otp_candidates(subject: &str, body: &str) -> Vec<Candidate> {
             let after = window_after(text, m.end(), 30);
 
             let close = KEYWORD.is_match(window_before(text, m.start(), 25));
-            if KEYWORD.is_match(before) {
+            let (keyed_before, keyed_after) = (KEYWORD.is_match(before), KEYWORD.is_match(after));
+            if keyed_before {
                 score += 10;
                 // Closer keywords count more ("code: 123456").
                 if close {
                     score += 4;
                 }
-            } else if KEYWORD.is_match(after) {
+            } else if keyed_after {
                 score += 6; // "123456 is your code"
             }
             // "Line 00001 of …", "order no. 552190": a counter or a
             // reference, also in a sentence with a code word ("the code
             // for order no. 552190 is …"). A number with no code word near
             // is let off when the subject has one.
-            let keyed_here = KEYWORD.is_match(before) || KEYWORD.is_match(after);
+            let keyed_here = keyed_before || keyed_after;
             if letters == 0 && (keyed_here || !subject_keyed) && counted(text, m.start()) {
                 score -= 5;
             }
@@ -113,7 +114,7 @@ pub fn otp_candidates(subject: &str, body: &str) -> Vec<Candidate> {
                 prev,
                 '$' | '€' | '£' | '+' | '#' | '/' | '=' | '.' | ',' | ':' | '&' | '?' | '%'
             ) && !before.trim_end().ends_with("code:")
-                && !KEYWORD.is_match(window_before(text, m.start(), 25))
+                && !close
             {
                 score -= 5;
             }
@@ -147,13 +148,21 @@ pub fn otp_candidates(subject: &str, body: &str) -> Vec<Candidate> {
 /// word of its own in `text` (not the end of a longer one).
 fn counted(text: &str, at: usize) -> bool {
     let window = window_before(text, at, 24);
-    COUNTER.find(window).is_some_and(|c| {
+    let mut from = 0;
+    // The leftmost match may start inside a word ("Online #5521"): a later
+    // one may still be a word of its own ("#").
+    while let Some(c) = COUNTER.find_at(window, from) {
         let start = at - window.len() + c.start();
-        text[..start]
+        if text[..start]
             .chars()
             .next_back()
             .is_none_or(|ch| !ch.is_alphanumeric())
-    })
+        {
+            return true;
+        }
+        from = c.start() + window[c.start()..].chars().next().map_or(1, char::len_utf8);
+    }
+    false
 }
 
 /// The most likely verification code, if any. `custom` overrides the
@@ -496,6 +505,11 @@ mod tests {
         assert_eq!(best("", "Wiederverkaufspart 482913"), Some("482913".into()));
         assert_eq!(best("Sign in", "Line 1: 482913"), Some("482913".into()));
         assert_eq!(best("", "One last step: 482913"), Some("482913".into()));
+        // A counting word inside a longer word, then a `#` of its own.
+        assert_eq!(best("", "Online #552190 shipped."), None);
+        assert_eq!(best("", "Reorder #5521 today."), None);
+        assert!(counted("Online #552190", 8));
+        assert!(!counted("Online 552190", 7));
         assert_eq!(best("Ticket 00042", "Reply above this line."), None);
         // With a code word near, the same shapes are codes.
         assert_eq!(

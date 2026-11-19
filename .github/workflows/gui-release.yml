@@ -18,7 +18,7 @@ permissions:
   contents: read
 jobs:
   # Stops before any build if the three version fields disagree, if the
-  # release notes or the README's download link aren't about that version, if
+  # release notes or the README's desktop versions aren't that version, if
   # the tag isn't it (`gui-v0.1.0` for 0.1.0), or if Cargo.lock is stale.
   version:
     runs-on: ubuntu-latest
@@ -51,8 +51,15 @@ jobs:
             echo "::error::gui/RELEASE_NOTES.md's intro or its \"What's new in $crate\" heading names another version"
             exit 1
           fi
-          if ! grep -Fq "[Download the desktop app (version $crate)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v$crate)" README.md; then
-            echo "::error::README.md's \"Download the desktop app\" link doesn't name gui-v$crate"
+          if ! grep -Fq "[release page (version $crate)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v$crate)" README.md; then
+            echo "::error::README.md's desktop release page link doesn't name gui-v$crate"
+            exit 1
+          fi
+          # Every desktop version README.md names (links, file names) is this one.
+          stale=$(grep -oE 'gui-v[0-9][0-9A-Za-z.+-]*[0-9A-Za-z]|tmpmail-desktop-[0-9][0-9A-Za-z.+-]*-(amd64|x86_64|universal|x64)' README.md \
+            | sed -E 's/^gui-v//; s/^tmpmail-desktop-//; s/-(amd64|x86_64|universal|x64)$//' | grep -vxF "$crate" | sort -u || true)
+          if [ -n "$stale" ]; then
+            echo "::error::README.md names other desktop versions than $crate: $stale"
             exit 1
           fi
           echo "version=$crate" >> "$GITHUB_OUTPUT"

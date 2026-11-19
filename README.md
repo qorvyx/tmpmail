@@ -48,58 +48,75 @@ tmpmail otp --wait --include-existing    # waits for the mail, then prints 48291
 
 ## Install
 
-tmpmail works on Linux (Fedora, Debian, Ubuntu, Arch and others), macOS and Windows. It
-comes in two parts that share the same inboxes: the **command-line tool** (with the
-full-screen view and the AI agent server) and the **desktop app**. Install one or both.
+tmpmail comes in two parts. They share the same inboxes and settings; install one or both.
 
-### Command-line tool
-
-| System | Recommended | Other ways |
+| Part | Command | What you get |
 |---|---|---|
-| **Debian, Ubuntu** | the [`.deb` package](#deb-and-rpm-packages) | `brew install qorvyx/tap/tmpmail`, `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
-| **Fedora** and other RPM systems | the [`.rpm` package](#deb-and-rpm-packages) | `brew install qorvyx/tap/tmpmail`, `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
-| **Other Linux** | `brew install qorvyx/tap/tmpmail` | `cargo install --locked tmpmail`, or the [download](#download-on-linux) |
-| **macOS** | `brew install qorvyx/tap/tmpmail` | `cargo install --locked tmpmail`, or the `.tar.gz` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest) |
-| **Windows** | the `.zip` from the [releases page](https://github.com/qorvyx/tmpmail/releases/latest): unzip it and put `tmpmail.exe` in a folder on your `PATH` ([how](#on-windows)) | `cargo install --locked tmpmail` (needs Rust and the Visual Studio C++ Build Tools) |
+| **Command-line tool** | `tmpmail` | the commands below, a full-screen view in the terminal (`tmpmail tui`) and the [AI agent server](#with-an-ai-agent) |
+| **Desktop app** | **tmpmail** in your apps menu (`tmpmail-gui` from a terminal with the `.deb` or `.rpm`; the AppImage runs from its own file) | a window with your mail, the code in a banner with a Copy button, notifications and a tray icon |
 
-With Homebrew, use the full name `qorvyx/tap/tmpmail`: Homebrew's own `tmpmail` is a
-different program. [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can
-run `cargo binstall tmpmail` to get the ready-made program instead of compiling it.
+Pick your system: [Debian and Ubuntu](#debian-and-ubuntu) · [Fedora](#fedora) ·
+[Arch and other Linux](#arch-and-other-linux) · [macOS](#macos) · [Windows](#windows).
+The desktop app's files are on its own
+**[release page (version 0.1.6)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.6)**.
 
-#### .deb and .rpm packages
+### Debian and Ubuntu
 
-Each release from 0.3.6 on has them. For x86_64; on ARM, use `arm64` in place of `amd64`
-(deb) or `aarch64` in place of `x86_64` (rpm).
+Command-line tool:
 
 ```sh
-# Debian, Ubuntu and others with apt
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-cli_0.3.7_amd64.deb
 sudo apt install ./tmpmail-cli_0.3.7_amd64.deb
+```
 
-# Fedora and others with dnf
+Desktop app:
+
+```sh
+curl -fLO https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-amd64.deb
+sudo apt install ./tmpmail-desktop-0.1.6-amd64.deb
+```
+
+### Fedora
+
+Also for other systems that use `.rpm` packages. Command-line tool:
+
+```sh
 curl -fLO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-cli-0.3.7-1.x86_64.rpm
 sudo dnf install ./tmpmail-cli-0.3.7-1.x86_64.rpm
 ```
 
-This installs the command-line tool only; the desktop app is a separate download. The two
-packages have different names and share no files, so both can be installed side by side.
-Their package names (what `apt remove` and `dnf remove` take) aren't the commands:
+Desktop app:
 
-| Package name | Command | What it is |
-|---|---|---|
-| `tmpmail-cli` | `tmpmail` | the command-line tool |
-| `tmpmail` | `tmpmail-gui` | the [desktop app](#desktop-app) |
+```sh
+curl -fLO https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-x86_64.rpm
+sudo dnf install ./tmpmail-desktop-0.1.6-x86_64.rpm
+```
 
-The `tmpmail-cli` package puts `tmpmail` in `/usr/bin` with its man pages (`man tmpmail`) and
-the bash, zsh and fish completions. It runs on its own; two extras help: `xdg-utils` opens mail and links
-in the browser (recommended, so apt and dnf install it too unless you add
-`--no-install-recommends` or `--setopt=install_weak_deps=False`), and `wl-clipboard` or `xclip`
-lets `tmpmail copy` use the clipboard. It doesn't update by itself: install the next version's
-file the same way.
+<details>
+<summary>More about the .deb and .rpm packages</summary>
 
-#### Download on Linux
+- **On ARM** (command-line tool only): use `arm64` in place of `amd64` in the `.deb` name, or
+  `aarch64` in place of `x86_64` in the `.rpm` name.
+- **Package names** (what `apt remove` and `dnf remove` take) aren't the commands:
 
-For x86_64 (on ARM, use `aarch64` in place of `x86_64`):
+  | Package name | Command | What it is |
+  |---|---|---|
+  | `tmpmail-cli` | `tmpmail` | the command-line tool |
+  | `tmpmail` | `tmpmail-gui` | the desktop app |
+
+- **What the command-line package installs:** `/usr/bin/tmpmail`, its man pages
+  (`man tmpmail`) and the bash, zsh and fish completions. It needs no other package;
+  `xdg-utils` (to open mail and links in the browser) is recommended, so apt and dnf install
+  it too, and `wl-clipboard` or `xclip` lets `tmpmail copy` use the clipboard.
+- **Updates:** the packages don't update by themselves; install the next version's file the
+  same way.
+
+</details>
+
+### Arch and other Linux
+
+Command-line tool, with Homebrew: `brew install qorvyx/tap/tmpmail`. Or download it (on ARM,
+use `aarch64` in place of `x86_64`):
 
 ```sh
 curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.7/tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz
@@ -107,36 +124,100 @@ tar xzf tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz
 install -D -t ~/.local/bin tmpmail-0.3.7-x86_64-unknown-linux-musl/tmpmail
 ```
 
-If a new shell then says `tmpmail: command not found` (Arch, for one, doesn't put `~/.local/bin`
-on `PATH`), add that folder to `PATH` once: in bash, add
-`export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` (zsh: `~/.zshrc`); in fish, run
-`fish_add_path ~/.local/bin`.
+If a new terminal then says `tmpmail: command not found`, add `~/.local/bin` to your `PATH`:
+in bash, add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` (zsh: `~/.zshrc`); in
+fish, run `fish_add_path ~/.local/bin`.
 
-#### On Windows
-
-Windows has no folder of your own on `PATH` at first. For example: create
-`%LOCALAPPDATA%\Programs\tmpmail`, put `tmpmail.exe` there, then add that folder to your
-user `Path` (Start → "Edit environment variables for your account" → Path → **Edit** →
-**New**), and open a new terminal. `cargo binstall tmpmail` also works, but cargo-binstall's
-own Windows program needs the Visual C++ Redistributable.
-
-#### Check a download
-
-Each release has a `SHA256SUMS` file, and every file has a GitHub build attestation that
-proves it was built from this repository. Download `SHA256SUMS` next to the file and run
-`sha256sum -c --ignore-missing SHA256SUMS`. On Windows, `certutil -hashfile FILE SHA256` in
-a command prompt (or `Get-FileHash FILE` in PowerShell) prints the file's hash to compare
-with its line in `SHA256SUMS`. Or check the attestation (this needs the GitHub CLI 2.49 or
-later, logged in with `gh auth login` or `GH_TOKEN` set):
+Desktop app: the AppImage, which runs on its own.
 
 ```sh
-gh attestation verify tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
-  --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml
+curl -fLO https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-x86_64.AppImage
+chmod +x tmpmail-desktop-0.1.6-x86_64.AppImage
+./tmpmail-desktop-0.1.6-x86_64.AppImage
 ```
 
-#### Shell completions (optional)
+<details>
+<summary>More about the AppImage</summary>
 
-Homebrew and the `.deb` and `.rpm` install them already. For the other ways:
+- It may need `libfuse2`; without FUSE, run it with `--appimage-extract-and-run`
+  ([details](gui/README.md#without-fuse---appimage-extract-and-run)).
+- It adds no menu entry by itself; AppImageLauncher or Gear Lever add one
+  ([or by hand](gui/README.md#the-appimage)).
+- It shows COLRv1 color emoji (Fedora's) in black and white, since the WebKit it carries
+  can't draw them ([why](gui/README.md#the-appimage)).
+- On NVIDIA, if the window stays blank, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`
+  (this goes for the `.deb` and `.rpm` too).
+
+</details>
+
+### macOS
+
+Both with [Homebrew](https://brew.sh):
+
+```sh
+brew install qorvyx/tap/tmpmail                  # command-line tool
+brew install --cask qorvyx/tap/tmpmail-desktop   # desktop app (macOS 11 or later)
+```
+
+The desktop app isn't notarized by Apple, so macOS refuses to open it the first time: open
+it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
+macOS asks again after each update.
+
+<details>
+<summary>More macOS details</summary>
+
+- **Use the full names** (`qorvyx/tap/...`): Homebrew's own `tmpmail` is a different program.
+- **Without Homebrew:** the command-line tool's `.tar.gz` is on the
+  [releases page](https://github.com/qorvyx/tmpmail/releases/latest); the desktop app's
+  `tmpmail-desktop-0.1.6-universal.dmg` (macOS 10.15 or later) is on
+  [its release page](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.6): open it
+  and drag tmpmail to Applications.
+- **From a terminal**, `xattr -dr com.apple.quarantine /Applications/tmpmail.app` does the
+  same as **Open Anyway** (on macOS 15 and later, Control-click → Open no longer does).
+
+</details>
+
+### Windows
+
+**Command-line tool:** download `tmpmail-0.3.7-x86_64-pc-windows-msvc.zip` from the
+[releases page](https://github.com/qorvyx/tmpmail/releases/latest) and unzip it. To run
+`tmpmail` from any terminal, put `tmpmail.exe` in a folder of its own, for example
+`%LOCALAPPDATA%\Programs\tmpmail`, then add that folder to your `Path`: Start → "Edit
+environment variables for your account" → **Path** → **Edit** → **New**. Open a new
+terminal.
+
+**Desktop app:** download
+[`tmpmail-desktop-0.1.6-x64-setup.exe`](https://github.com/qorvyx/tmpmail/releases/download/gui-v0.1.6/tmpmail-desktop-0.1.6-x64-setup.exe)
+and run it. The app isn't code-signed, so Windows warns:
+
+1. Edge may say the file "isn't commonly downloaded": open the downloads list, click **⋯**
+   next to the file, then **Keep**, **Show more**, **Keep anyway**.
+2. If Windows says "Windows protected your PC", click **More info**, then **Run anyway**.
+
+<details>
+<summary>More Windows details</summary>
+
+- The installer installs for your user only (no admin prompt) and fetches WebView2 if it's
+  missing. **Smart App Control** blocks unsigned apps completely; it can only be turned off
+  as a whole.
+- The app installs into `%LOCALAPPDATA%\tmpmail`, the same folder that holds the
+  command-line tool's inboxes.
+- `cargo install --locked tmpmail` needs Rust and the Visual Studio C++ Build Tools;
+  cargo-binstall's own Windows program needs the Visual C++ Redistributable.
+
+</details>
+
+### More install options
+
+<details>
+<summary>cargo, shell completions, checking a download, updating and uninstalling</summary>
+
+**With Rust:** `cargo install --locked tmpmail` builds the command-line tool on any system;
+[cargo-binstall](https://github.com/cargo-bins/cargo-binstall) users can run
+`cargo binstall tmpmail` to get the ready-made program instead.
+
+**Shell completions:** Homebrew and the `.deb` and `.rpm` install them already. For the
+other ways:
 
 ```sh
 tmpmail completions bash > ~/.local/share/bash-completion/completions/tmpmail
@@ -152,76 +233,50 @@ if (!(Test-Path $PROFILE)) { New-Item -Force $PROFILE }
 Add-Content $PROFILE '. $HOME\tmpmail-completions.ps1'
 ```
 
-Windows PowerShell 5.1 doesn't run a profile until scripts are allowed for your account; if a
-new window says "running scripts is disabled on this system", allow local scripts once:
+If a new PowerShell window then says "running scripts is disabled on this system", allow
+local scripts once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+**Check a download:** each release has a `SHA256SUMS` file. Download it next to the file
+and run `sha256sum -c --ignore-missing SHA256SUMS` (on Windows, `certutil -hashfile FILE
+SHA256` prints the hash to compare). Every file also has a GitHub build attestation that
+proves it was built from this repository (needs the GitHub CLI 2.49 or later, logged in):
+
+```sh
+gh attestation verify tmpmail-0.3.7-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
+  --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml
 ```
 
-#### Upgrade and uninstall
+For the desktop app's files, end it with `gui-release.yml` instead.
 
-| Installed with | Upgrade | Uninstall |
+**Update and uninstall the command-line tool:**
+
+| Installed with | Update | Uninstall |
 |---|---|---|
 | Homebrew | `brew upgrade qorvyx/tap/tmpmail` | `brew uninstall qorvyx/tap/tmpmail` |
-| The `.deb` | `sudo apt install ./tmpmail-cli_NEW_amd64.deb` | `sudo apt remove tmpmail-cli` |
-| The `.rpm` | `sudo dnf install ./tmpmail-cli-NEW-1.x86_64.rpm` | `sudo dnf remove tmpmail-cli` |
+| The `.deb` | install the new version's file | `sudo apt remove tmpmail-cli` |
+| The `.rpm` | install the new version's file | `sudo dnf remove tmpmail-cli` |
 | cargo | `cargo install --locked tmpmail` | `cargo uninstall tmpmail` |
-| A download | download the new version the same way | delete the `tmpmail` file (`tmpmail.exe` on Windows, and its folder and `Path` entry if you made them for it) |
+| A download | download the new version the same way | delete `tmpmail` (`tmpmail.exe`) |
 
-Your inboxes and settings stay in `~/.local/state/tmpmail` and `~/.config/tmpmail` on Linux,
-`~/Library/Application Support/tmpmail` on macOS, and `%LOCALAPPDATA%\tmpmail` and
-`%APPDATA%\tmpmail` on Windows; delete those folders to remove everything. (On Windows the
-desktop app installs into `%LOCALAPPDATA%\tmpmail` too: uninstall it first if you have it.)
+The desktop app: update by installing the new version's file (Homebrew:
+`brew upgrade --cask qorvyx/tap/tmpmail-desktop`); uninstall it like any app
+(`sudo apt remove tmpmail`, `sudo dnf remove tmpmail`, Windows Settings → Apps, or
+`brew uninstall --cask qorvyx/tap/tmpmail-desktop`).
 
-Optional helpers you probably have already: `copy` uses `wl-copy`, `xclip` or `xsel` on
+Uninstalling either part keeps your inboxes and settings, since the other may use them. To
+remove everything, delete `~/.local/state/tmpmail` and `~/.config/tmpmail` on Linux,
+`~/Library/Application Support/tmpmail` on macOS, or `%LOCALAPPDATA%\tmpmail` and
+`%APPDATA%\tmpmail` on Windows (uninstall the desktop app first there: it is installed in
+`%LOCALAPPDATA%\tmpmail` too). [The app's own data](gui/README.md#removing-it).
+
+**Optional helpers** you probably have already: `copy` uses `wl-copy`, `xclip` or `xsel` on
 Linux (`pbcopy` on macOS, `clip.exe` on Windows); `read --html` opens your browser;
 `watch --notify` uses `notify-send` on Linux; long messages open in `less`.
 
-### Desktop app
+**Versions:** the desktop app works with the command-line tool from version 0.3.2 on.
 
-**[Download the desktop app (version 0.1.6)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.6)**
-and pick the file for your system. (The release GitHub marks "Latest" belongs to the
-command-line tool and has no desktop files.)
-
-The app isn't code-signed, so Windows and macOS warn the first time you open it; the table
-says how to get past the warning.
-
-| System | File | How to install |
-|---|---|---|
-| **Windows 10/11** | `tmpmail-desktop-VERSION-x64-setup.exe` | Download it in your browser. Edge may hold it as "isn't commonly downloaded": open the downloads list, click **⋯** next to the file, then **Keep**, **Show more**, **Keep anyway**. Run it. If Windows says "Windows protected your PC", click **More info**, then **Run anyway**. |
-| **macOS 10.15+** | `tmpmail-desktop-VERSION-universal.dmg`, or Homebrew (macOS 11+): `brew install --cask qorvyx/tap/tmpmail-desktop` | Open the DMG and drag tmpmail to Applications (Homebrew does this for you). Open tmpmail once (macOS refuses), then go to System Settings → Privacy & Security and click **Open Anyway**. |
-| **Debian, Ubuntu** | `tmpmail-desktop-VERSION-amd64.deb` | `sudo apt install ./tmpmail-desktop-VERSION-amd64.deb` |
-| **Fedora** and other RPM systems | `tmpmail-desktop-VERSION-x86_64.rpm` | `sudo dnf install ./tmpmail-desktop-VERSION-x86_64.rpm` |
-| **Other Linux** (Arch and others) | `tmpmail-desktop-VERSION-x86_64.AppImage` | `chmod +x` the file and run it. |
-
-<details>
-<summary>More install details</summary>
-
-- **Windows:** the installer installs for your user only (no admin prompt) and fetches
-  WebView2 if it's missing. **Smart App Control** blocks unsigned apps completely; it can
-  only be turned off as a whole.
-- **macOS 15 and later:** Control-click → Open no longer skips the warning. From a
-  terminal, `xattr -dr com.apple.quarantine /Applications/tmpmail.app` does the same as
-  **Open Anyway**. macOS asks again after each update, Homebrew's included, since the app
-  is only ad-hoc signed.
-- **Homebrew (macOS):** `brew upgrade --cask qorvyx/tap/tmpmail-desktop` updates it,
-  `brew uninstall --cask qorvyx/tap/tmpmail-desktop` removes it, and `--zap` also deletes
-  the app's own data (not the settings and inboxes it shares with the command-line tool).
-  Homebrew's own cask list has no `tmpmail-desktop`; use the full name.
-- **AppImage:** it may need `libfuse2`; without FUSE, run it with
-  `--appimage-extract-and-run` ([details](gui/README.md#without-fuse---appimage-extract-and-run)).
-  It adds no menu entry by itself; AppImageLauncher or Gear Lever add one
-  ([or by hand](gui/README.md#the-appimage)). It shows COLRv1 color emoji (Fedora's) in black
-  and white, since the WebKit it carries can't draw them ([why](gui/README.md#the-appimage)).
-- **NVIDIA:** if the window stays blank, start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
-- **Uninstalling** keeps your settings and inboxes, since the command-line tool shares them.
-  [How to remove everything](gui/README.md#removing-it).
-- **With the command-line tool:** use version 0.3.2 or later of it.
-- **Check a download:** each release has `SHA256SUMS` and build attestations
-  (`gh attestation verify FILE --repo qorvyx/tmpmail --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`;
-  GitHub CLI 2.49 or later, logged in).
-- **From source** (Rust 1.90+, Node 24, pnpm): `cd gui && pnpm install && pnpm tauri dev`.
+**Building the desktop app from source** (Rust 1.90+, Node 24, pnpm):
+`cd gui && pnpm install && pnpm tauri dev`.
 
 </details>
 
@@ -256,8 +311,7 @@ highlighted, and `y` copies it. Press `?` for the keys.
 Rather have a window? The desktop app does the same with the same inboxes: it shows your
 mail live, puts the code in a big banner with a Copy button, shows HTML mail safely (light
 or dark), saves attachments, notifies you of new mail, and can stay in the tray.
-[More about the app](gui/README.md). To install it, see
-[Install → Desktop app](#desktop-app).
+[More about the app](gui/README.md). To install it, see [Install](#install).
 
 ![The tmpmail desktop app showing a verification code in a banner above the mail](assets/desktop.png)
 
@@ -511,7 +565,9 @@ With `--json`, errors are printed as `{"error":{"kind":"...","message":"..."}}`.
 <details>
 <summary><b>Configuration and environment</b></summary>
 
-`~/.config/tmpmail/config.toml` (or `$TMPMAIL_CONFIG`), all optional:
+`config.toml`, all optional: in `~/.config/tmpmail/` on Linux,
+`~/Library/Application Support/tmpmail/` on macOS, `%APPDATA%\tmpmail\` on Windows (or the
+file `$TMPMAIL_CONFIG` names):
 
 ```toml
 providers = ["mailtm", "guerrilla"]   # order for `new`
@@ -545,8 +601,8 @@ Environment: `TMPMAIL_PROVIDER` (comma list), `TMPMAIL_TIMEOUT`, `TMPMAIL_POLL_I
 ## Privacy and security
 
 - **No telemetry.** tmpmail only talks to the mail service you use.
-- **Your inboxes stay private.** Addresses and their passwords are kept in
-  `~/.local/state/tmpmail/state.json`, readable only by you.
+- **Your inboxes stay private.** Addresses and their passwords are kept in a `state.json`
+  only you can read (`~/.local/state/tmpmail/` on Linux; [elsewhere](#more-install-options)).
 - **Mail can't take over your terminal.** Hidden characters and terminal control codes are
   removed before anything is shown, so a sender can't change your screen or fake a name.
 - **HTML mail is made safe.** `read --html` and the desktop app remove scripts, forms and

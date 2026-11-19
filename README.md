@@ -91,9 +91,9 @@ version's file the same way.
 For x86_64 (on ARM, use `aarch64` in place of `x86_64`):
 
 ```sh
-curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.5/tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz
-tar xzf tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz
-install -D -t ~/.local/bin tmpmail-0.3.5-x86_64-unknown-linux-musl/tmpmail
+curl -LO https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz
+tar xzf tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz
+install -D -t ~/.local/bin tmpmail-0.3.6-x86_64-unknown-linux-musl/tmpmail
 ```
 
 #### Check a download
@@ -102,7 +102,7 @@ Each release has a `SHA256SUMS` file, and every file has a GitHub build attestat
 proves it was built from this repository:
 
 ```sh
-gh attestation verify tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
+gh attestation verify tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
   --signer-workflow qorvyx/tmpmail/.github/workflows/release.yml
 ```
 
@@ -135,7 +135,7 @@ Linux (`pbcopy` on macOS, `clip.exe` on Windows); `read --html` opens your brows
 
 ### Desktop app
 
-**[Download the desktop app (version 0.1.4)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.4)**
+**[Download the desktop app (version 0.1.5)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v0.1.5)**
 and pick the file for your system. (The release GitHub marks "Latest" belongs to the
 command-line tool and has no desktop files.)
 
@@ -356,11 +356,11 @@ In GitHub Actions:
 - name: Install tmpmail
   run: |
     mkdir -p ~/.local/bin && cd "$RUNNER_TEMP"
-    curl -sSfL -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.5/tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz \
-      -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.5/SHA256SUMS
+    curl -sSfL -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz \
+      -O https://github.com/qorvyx/tmpmail/releases/download/v0.3.6/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
-    tar xzf tmpmail-0.3.5-x86_64-unknown-linux-musl.tar.gz --strip-components=1 \
-      -C ~/.local/bin tmpmail-0.3.5-x86_64-unknown-linux-musl/tmpmail
+    tar xzf tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz --strip-components=1 \
+      -C ~/.local/bin tmpmail-0.3.6-x86_64-unknown-linux-musl/tmpmail
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 - name: Sign-up test

@@ -18,8 +18,8 @@ permissions:
   contents: read
 jobs:
   # Stops before any build if the three version fields disagree, if the
-  # release notes aren't about that version, if the tag isn't it (`gui-v0.1.0`
-  # for 0.1.0), or if Cargo.lock is stale.
+  # release notes or the README's download link aren't about that version, if
+  # the tag isn't it (`gui-v0.1.0` for 0.1.0), or if Cargo.lock is stale.
   version:
     runs-on: ubuntu-latest
     outputs:
@@ -44,6 +44,15 @@ jobs:
           fi
           if ! grep -q "tmpmail-desktop-$crate-" gui/RELEASE_NOTES.md; then
             echo "::error::gui/RELEASE_NOTES.md doesn't name the $crate files"
+            exit 1
+          fi
+          if ! head -n 1 gui/RELEASE_NOTES.md | grep -Fq "tmpmail desktop $crate " \
+            || ! grep -Fqx "## What's new in $crate" gui/RELEASE_NOTES.md; then
+            echo "::error::gui/RELEASE_NOTES.md's intro or its \"What's new in $crate\" heading names another version"
+            exit 1
+          fi
+          if ! grep -Fq "[Download the desktop app (version $crate)](https://github.com/qorvyx/tmpmail/releases/tag/gui-v$crate)" README.md; then
+            echo "::error::README.md's \"Download the desktop app\" link doesn't name gui-v$crate"
             exit 1
           fi
           echo "version=$crate" >> "$GITHUB_OUTPUT"

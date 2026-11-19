@@ -1,9 +1,8 @@
-tmpmail desktop 0.1.4 is the first release that is no longer a preview. It fixes dragging
-attachments out on X11, inline images in mail.tm mail, a blank window in the AppImage with color
-emoji, and a narrow message pane, and it brings the security fixes of a full review of the code.
-It is built on the same core as the `tmpmail` command-line tool 0.3.5, so that release's
-fixes reach the app too (cleaner sender text, waiting through provider rate limits, headers
-labelled ISO-8859-1 read as Windows-1252), and it shares the tool's inboxes and `config.toml`.
+tmpmail desktop 0.1.5 adds a Homebrew cask for macOS, keeps the AppImage's own settings away
+from the browser or mail client it opens for a link, and updates the HTML sanitizer for a
+security fix. It is built on the same core as the `tmpmail` command-line tool 0.3.6, which
+now also comes as `.deb` and `.rpm` packages (`tmpmail-cli`) that install beside this app,
+and it shares the tool's inboxes and `config.toml`.
 
 It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS and on Windows. Please report
 what breaks: <https://github.com/qorvyx/tmpmail/issues>.
@@ -13,11 +12,12 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 - **Security: HTML sanitizer updated** to ammonia 4.2.5, which fixes a mutation XSS through
   embedded SVG and MathML (RUSTSEC-2026-0533).
 - **Homebrew cask for macOS.** On macOS 11 or later,
-  `brew install --cask qorvyx/tap/tmpmail-desktop` installs the app from the release's DMG, and `brew upgrade --cask` updates it. The app is still
-  ad-hoc signed and not notarized, so macOS asks once through System Settings → Privacy &
-  Security → **Open Anyway**, after each update too; the cask's caveats say how.
-  `brew uninstall --zap` also removes the app's own data, but not the settings and inboxes
-  it shares with the command-line tool.
+  `brew install --cask qorvyx/tap/tmpmail-desktop` installs the app from the release's DMG,
+  and `brew upgrade --cask` updates it. The app is still ad-hoc signed and not notarized, so
+  macOS blocks its first start, and again after each update, until you allow it in System
+  Settings → Privacy & Security → **Open Anyway**; the cask's caveats say how.
+  `brew uninstall --zap --cask qorvyx/tap/tmpmail-desktop` also removes the app's own data,
+  but not the settings and inboxes it shares with the command-line tool.
 - **AppImage: links open without the AppImage's environment.** A browser or mail client
   the AppImage started for a link inherited `APPDIR`, `APPIMAGE`, `LD_LIBRARY_PATH`, `PATH`,
   `XDG_DATA_DIRS` and other variables pointing inside the AppImage's mount (gone once the app
@@ -224,16 +224,16 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 
 | System | File |
 |---|---|
-| Windows 10/11 (x64) | `tmpmail-desktop-0.1.4-x64-setup.exe` |
-| macOS 10.15+ (Apple silicon and Intel) | `tmpmail-desktop-0.1.4-universal.dmg` |
-| Debian, Ubuntu (x86_64) | `tmpmail-desktop-0.1.4-amd64.deb` |
-| Fedora and other RPM-based (x86_64) | `tmpmail-desktop-0.1.4-x86_64.rpm` |
-| Other Linux (x86_64) | `tmpmail-desktop-0.1.4-x86_64.AppImage` |
+| Windows 10/11 (x64) | `tmpmail-desktop-0.1.5-x64-setup.exe` |
+| macOS 10.15+ (Apple silicon and Intel) | `tmpmail-desktop-0.1.5-universal.dmg` |
+| Debian, Ubuntu (x86_64) | `tmpmail-desktop-0.1.5-amd64.deb` |
+| Fedora and other RPM-based (x86_64) | `tmpmail-desktop-0.1.5-x86_64.rpm` |
+| Other Linux (x86_64) | `tmpmail-desktop-0.1.5-x86_64.AppImage` |
 
 Check a download against `SHA256SUMS`, or its build attestation:
 
 ```sh
-gh attestation verify tmpmail-desktop-0.1.4-x86_64.AppImage --repo qorvyx/tmpmail \
+gh attestation verify tmpmail-desktop-0.1.5-x86_64.AppImage --repo qorvyx/tmpmail \
   --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml
 ```
 
@@ -251,8 +251,8 @@ The app isn't signed with a paid certificate, so each system warns once.
   fetches WebView2 if it's missing. If **Smart App Control** is on, it blocks the installer
   outright with no way past; it can only be turned off as a whole (Windows Security → App &
   browser control).
-- **Linux:** `sudo apt install ./tmpmail-desktop-0.1.4-amd64.deb`, or `sudo dnf install
-  ./tmpmail-desktop-0.1.4-x86_64.rpm`; both pull in WebKitGTK 4.1. The AppImage runs
+- **Linux:** `sudo apt install ./tmpmail-desktop-0.1.5-amd64.deb`, or `sudo dnf install
+  ./tmpmail-desktop-0.1.5-x86_64.rpm`; both pull in WebKitGTK 4.1. The AppImage runs
   as is after `chmod +x` (it may need `libfuse2`; without FUSE, run it with
   `--appimage-extract-and-run`). On NVIDIA, if the window stays blank, start it with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1`.

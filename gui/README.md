@@ -78,8 +78,9 @@ a safe HTML preview in light or dark, and the TUI's actions and keys. Released o
   name the logo by a file (written to `~/.cache/tmpmail/tmpmail-gui.png`) instead of by
   its icon name, so they show it either way. On Windows the installed app shows its own toasts, which launch a
   `tmpmail-desktop://open?inbox=…&message=…` link the installer registers: a click, on
-  screen or later in the notification center, brings the running app back (only one runs:
-  a second start hands its link over and exits) or starts it, and opens the message. A
+  screen or later in the notification center, brings the running app back in front of the
+  other windows (only one runs: a second start hands its link over and exits) or starts it,
+  and opens the message. A
   debug build, or one the installer didn't register the link for, has no app id for Windows, so its toasts go through the plugin
   and a click counts only while the toast is on screen. Windows shows the app's name only
   for the installed app.

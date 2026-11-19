@@ -544,7 +544,71 @@ pub fn raise(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
         let _ = w.show();
+        #[cfg(not(windows))]
         let _ = w.set_focus();
+        // On the window's own thread, which `to_front` attaches.
+        #[cfg(windows)]
+        {
+            let window = w.clone();
+            if let Err(e) = w.run_on_main_thread(move || to_front(&window)) {
+                eprintln!("tmpmail-gui: could not bring the window to the front: {e}");
+            }
+        }
+    }
+}
+
+/// Windows, in place of `set_focus` (whose fallback presses Alt in the
+/// window in front): Windows refuses the foreground to a process that
+/// didn't get the last input. A notification click goes to the shell; the
+/// second start that hands the click over passes its own right on
+/// (`AllowSetForegroundWindow`, in the single-instance plugin), but that
+/// start often has none itself. Refused, the window stays behind the one in
+/// front with its taskbar button flashing. Attached to the input of the
+/// window in front (unless that window hangs, which would hang this
+/// thread too), the call goes through. If the window still isn't in front,
+/// it is moved above the other windows (topmost and back, which leaves it
+/// at the top of the normal ones), which needs no such right; it may then
+/// be in front but not focused.
+#[cfg(windows)]
+fn to_front(w: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, HWND_NOTOPMOST,
+        HWND_TOPMOST, IsHungAppWindow, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow,
+        SetWindowPos,
+    };
+    let Ok(handle) = w.hwnd() else {
+        return;
+    };
+    // By its value: Tauri's `windows` crate may be another version.
+    let hwnd = HWND(handle.0);
+    // SAFETY: plain Win32 calls on the app's own window, on the thread that
+    // owns it; the input attachment is undone before returning.
+    unsafe {
+        let front = GetForegroundWindow();
+        if front == hwnd {
+            return;
+        }
+        let ours = GetCurrentThreadId();
+        let theirs = if front.is_invalid() || IsHungAppWindow(front).as_bool() {
+            0
+        } else {
+            GetWindowThreadProcessId(front, None)
+        };
+        let attached =
+            theirs != 0 && theirs != ours && AttachThreadInput(ours, theirs, true).as_bool();
+        let _ = BringWindowToTop(hwnd);
+        let _ = SetForegroundWindow(hwnd);
+        if attached {
+            let _ = AttachThreadInput(ours, theirs, false);
+        }
+        // The answer of SetForegroundWindow isn't to be trusted: look.
+        if GetForegroundWindow() != hwnd {
+            let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
+            let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+            let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags);
+        }
     }
 }
 

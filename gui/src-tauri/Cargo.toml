@@ -34,7 +34,8 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 # toast is built with the WinRT bindings already in the tree.
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2.5.5"
-windows = { version = "0.62.2", features = ["Data_Xml_Dom", "UI_Notifications", "Win32_System_Registry"] }
+# Bringing the window to the front on a notification click (notify.rs).
+windows = { version = "0.62.2", features = ["Data_Xml_Dom", "UI_Notifications", "Win32_Foundation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Dragging attachments out (the engine of `tauri-plugin-drag`, used from

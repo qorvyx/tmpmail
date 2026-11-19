@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Prints the Homebrew cask for a desktop app release, using the DMG's checksum
-# from its SHA256SUMS file. Meant for github.com/qorvyx/homebrew-tap as
-# Casks/tmpmail-desktop.rb; gui-release.yml doesn't run it yet.
+# from its SHA256SUMS file. gui-release.yml pushes the result to
+# github.com/qorvyx/homebrew-tap as Casks/tmpmail-desktop.rb.
 #
 #   scripts/homebrew-cask.sh VERSION SHA256SUMS > tmpmail-desktop.rb
 set -eu
@@ -26,7 +26,10 @@ cask "tmpmail-desktop" do
   desc "Disposable email with live mail and one-click verification codes"
   homepage "$repo"
 
-  depends_on macos: ">= :catalina"
+  # The app runs on 10.15+, but Homebrew itself needs 11 (Big Sur) or later
+  # (:catalina is no longer a symbol it knows). The keyword form loads in
+  # older brew versions too.
+  depends_on macos: ">= :big_sur"
 
   app "tmpmail.app"
 
@@ -41,9 +44,11 @@ cask "tmpmail-desktop" do
     "~/Library/WebKit/io.github.qorvyx.tmpmail",
   ]
 
+  # Homebrew quarantines the download, so Gatekeeper checks the app and
+  # blocks its first start; nothing here lifts the quarantine.
   caveats <<~EOS
-    tmpmail isn't notarized by Apple (it is ad-hoc signed), so macOS blocks
-    the first start. To allow it once:
+    tmpmail is not notarized by Apple (it is ad-hoc signed), so macOS blocks
+    its first start, and again after each upgrade. To allow it:
       1. Open tmpmail and close the warning.
       2. In System Settings > Privacy & Security, click "Open Anyway"
          next to the message about tmpmail, and enter your password.

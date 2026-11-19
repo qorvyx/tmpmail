@@ -145,7 +145,7 @@ says how to get past the warning.
 | System | File | How to install |
 |---|---|---|
 | **Windows 10/11** | `tmpmail-desktop-VERSION-x64-setup.exe` | Run it. When Windows says "Windows protected your PC", click **More info**, then **Run anyway**. |
-| **macOS 10.15+** | `tmpmail-desktop-VERSION-universal.dmg` | Open it and drag tmpmail to Applications. Open tmpmail once (macOS refuses), then go to System Settings → Privacy & Security and click **Open Anyway**. |
+| **macOS 10.15+** | `tmpmail-desktop-VERSION-universal.dmg`, or Homebrew (macOS 11+): `brew install --cask qorvyx/tap/tmpmail-desktop` | Open the DMG and drag tmpmail to Applications (Homebrew does this for you). Open tmpmail once (macOS refuses), then go to System Settings → Privacy & Security and click **Open Anyway**. |
 | **Debian, Ubuntu** | `tmpmail-desktop-VERSION-amd64.deb` | `sudo apt install ./tmpmail-desktop-VERSION-amd64.deb` |
 | **Fedora** and other RPM systems | `tmpmail-desktop-VERSION-x86_64.rpm` | `sudo dnf install ./tmpmail-desktop-VERSION-x86_64.rpm` |
 | **Other Linux** (Arch and others) | `tmpmail-desktop-VERSION-x86_64.AppImage` | `chmod +x` the file and run it. |
@@ -158,7 +158,12 @@ says how to get past the warning.
   only be turned off as a whole.
 - **macOS 15 and later:** Control-click → Open no longer skips the warning. From a
   terminal, `xattr -dr com.apple.quarantine /Applications/tmpmail.app` does the same as
-  **Open Anyway**.
+  **Open Anyway**. macOS asks again after each update, Homebrew's included, since the app
+  is only ad-hoc signed.
+- **Homebrew (macOS):** `brew upgrade --cask qorvyx/tap/tmpmail-desktop` updates it,
+  `brew uninstall --cask qorvyx/tap/tmpmail-desktop` removes it, and `--zap` also deletes
+  the app's own data (not the settings and inboxes it shares with the command-line tool).
+  Homebrew's own cask list has no `tmpmail-desktop`; use the full name.
 - **AppImage:** it may need `libfuse2`; without FUSE, run it with
   `--appimage-extract-and-run` ([details](gui/README.md#without-fuse---appimage-extract-and-run)).
   It adds no menu entry by itself; AppImageLauncher or Gear Lever add one

@@ -263,7 +263,11 @@ too.
 ## Removing it
 
 Uninstalling (`sudo apt remove tmpmail`, `sudo dnf remove tmpmail`, deleting the AppImage,
-moving tmpmail.app to the Bin, or Windows' uninstaller) removes the program. A package also
+moving tmpmail.app to the Bin, `brew uninstall --cask qorvyx/tap/tmpmail-desktop`, or
+Windows' uninstaller) removes the program. Installed with Homebrew, remove it with Homebrew
+too (moving the app to the Bin leaves Homebrew thinking it is installed); `brew uninstall
+--zap --cask qorvyx/tap/tmpmail-desktop` also deletes the window's own storage (the third
+row below). A package also
 removes its menu entry and icons; an AppImage you integrated leaves them (see below). Your
 inboxes are kept on purpose: the CLI uses the same ones, and an address you still need
 stays reachable. On Windows the uninstaller may offer to delete the application data: that
@@ -378,7 +382,10 @@ in `tauri.conf.json`:
 - **macOS:** one universal app (Apple silicon and Intel), macOS 10.15 or later, **ad-hoc
   signed** (`signingIdentity: "-"`): with no signature on the whole bundle, Apple silicon
   reports the app as "damaged" with no way past. It isn't notarized, so users go through
-  Open Anyway once.
+  Open Anyway once, and again after each update (an ad-hoc signature changes with every
+  build, so macOS, and Homebrew's upgrade, can't carry the approval over). Homebrew users
+  install it with `brew install --cask qorvyx/tap/tmpmail-desktop`; the same Open Anyway
+  step applies, and the cask's caveats say so.
 - **Windows:** an NSIS installer only (no MSI), per user (no admin prompt), with the
   WebView2 bootstrapper that downloads WebView2 if it's missing. Its hooks
   (`src-tauri/packaging/windows/hooks.nsh`) register the `tmpmail-desktop:` link scheme for
@@ -409,15 +416,19 @@ in `tauri.conf.json`:
    qorvyx/tmpmail/.github/workflows/gui-release.yml`), and creates a release
    titled "tmpmail desktop X.Y.Z", never marked latest (the CLI's release stays
    the latest), with `RELEASE_NOTES.md` as its notes.
+5. A last job, which compiles nothing, writes the Homebrew cask with
+   `scripts/homebrew-cask.sh VERSION SHA256SUMS` and pushes it to `qorvyx/homebrew-tap` as
+   `Casks/tmpmail-desktop.rb` (with the `HOMEBREW_TAP_TOKEN` secret, as the CLI's formula).
 
 Running the workflow by hand (`workflow_dispatch`) is a dry run: it builds and uploads the
 installers as run artifacts, without a release. Files are named
 `tmpmail-desktop-X.Y.Z-{x64-setup.exe,universal.dmg,amd64.deb,x86_64.rpm,x86_64.AppImage}`.
 
-`scripts/homebrew-cask.sh VERSION SHA256SUMS` prints a cask (`tmpmail-desktop`) for the
-DMG, with a caveat explaining Open Anyway, for `qorvyx/homebrew-tap`. It isn't run in CI
-yet. No updater yet either: it would
-need its own minisign key, backed up before the first release that uses it.
+The cask (`tmpmail-desktop`) installs the DMG's app, removes the app's own webview data on
+`brew uninstall --zap` (not the config and inboxes, which the CLI shares), and explains
+Open Anyway in its caveats. Homebrew quarantines what it downloads, so Gatekeeper checks
+the app as it does a DMG opened by hand; the cask doesn't lift the quarantine. No updater
+yet: it would need its own minisign key, backed up before the first release that uses it.
 
 ## The preview probe
 

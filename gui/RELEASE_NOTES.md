@@ -8,6 +8,15 @@ labelled ISO-8859-1 read as Windows-1252), and it shares the tool's inboxes and 
 It works on Fedora, Debian, Ubuntu, Arch and other Linux, on macOS and on Windows. Please report
 what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 
+## What's new in 0.1.5
+
+- **Homebrew cask for macOS.** On macOS 11 or later,
+  `brew install --cask qorvyx/tap/tmpmail-desktop` installs the app from the release's DMG, and `brew upgrade --cask` updates it. The app is still
+  ad-hoc signed and not notarized, so macOS asks once through System Settings → Privacy &
+  Security → **Open Anyway**, after each update too; the cask's caveats say how.
+  `brew uninstall --zap` also removes the app's own data, but not the settings and inboxes
+  it shares with the command-line tool.
+
 ## What's new in 0.1.4
 
 - **Dragging an attachment out works on X11.** On Xfce (and other X11 desktops) the drag

@@ -234,6 +234,11 @@ jobs:
   homebrew:
     needs: release
     runs-on: ubuntu-latest
+    # Shared with gui-release.yml's cask job: a v* and a gui-v* tag pushed
+    # together would otherwise both push to the tap from the same HEAD.
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
     env:
       TAP: qorvyx/homebrew-tap
     steps:

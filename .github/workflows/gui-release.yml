@@ -3,7 +3,8 @@
 # attestation, checked with `gh attestation verify FILE --repo qorvyx/tmpmail
 # --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`.
 # Running it by hand (workflow_dispatch) only builds, as a dry run; the
-# installers are then in the run's artifacts.
+# installers are then in the run's artifacts. A tag push also updates the
+# Homebrew cask (Casks/tmpmail-desktop.rb in qorvyx/homebrew-tap).
 # The CLI's release.yml runs on `v*`, which `gui-v*` doesn't match, and this
 # one doesn't match `v*` tags, so a tag never starts both.
 # The builds are unsigned (macOS: ad-hoc signed); see gui/README.md.
@@ -204,6 +205,12 @@ jobs:
           pattern: gui-*
           merge-multiple: true
       - run: cd dist && sha256sum tmpmail-desktop-* > SHA256SUMS && cat SHA256SUMS
+      # Before the release, so a failed upload can be retried by re-running
+      # this job (gh release create fails once the release exists).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SHA256SUMS
+          path: dist/SHA256SUMS
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
@@ -218,3 +225,45 @@ jobs:
           --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false
           --title "tmpmail desktop $VERSION"
           --notes-file gui/RELEASE_NOTES.md
+
+  # Updates Casks/tmpmail-desktop.rb in qorvyx/homebrew-tap, as release.yml
+  # does the formula; compiles nothing. Needs the HOMEBREW_TAP_TOKEN secret:
+  # a fine-grained token with contents write access to that repository only.
+  # The token is given to the push alone (in its URL, from the environment),
+  # never stored in a checkout's .git/config.
+  homebrew:
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    # Shared with release.yml's formula job: a v* and a gui-v* tag pushed
+    # together would otherwise both push to the tap from the same HEAD.
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
+    env:
+      TAP: qorvyx/homebrew-tap
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: SHA256SUMS
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.TAP }}
+          path: tap
+          persist-credentials: false
+      - run: |
+          mkdir -p tap/Casks
+          scripts/homebrew-cask.sh "$VERSION" SHA256SUMS > tap/Casks/tmpmail-desktop.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/tmpmail-desktop.rb
+          git commit -m "tmpmail-desktop $VERSION"
+      # The only step that sees the token.
+      - env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        working-directory: tap
+        run: git push "https://x-access-token:${TAP_TOKEN}@github.com/${TAP}.git" HEAD

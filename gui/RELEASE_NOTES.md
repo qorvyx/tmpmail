@@ -230,7 +230,8 @@ what breaks: <https://github.com/qorvyx/tmpmail/issues>.
 | Fedora and other RPM-based (x86_64) | `tmpmail-desktop-0.1.5-x86_64.rpm` |
 | Other Linux (x86_64) | `tmpmail-desktop-0.1.5-x86_64.AppImage` |
 
-Check a download against `SHA256SUMS`, or its build attestation:
+Check a download against `SHA256SUMS` (`sha256sum -c --ignore-missing SHA256SUMS`), or its
+build attestation (GitHub CLI 2.49 or later, logged in):
 
 ```sh
 gh attestation verify tmpmail-desktop-0.1.5-x86_64.AppImage --repo qorvyx/tmpmail \

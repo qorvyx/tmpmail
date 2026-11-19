@@ -83,8 +83,11 @@ sudo dnf install ./tmpmail-cli-0.3.6-1.x86_64.rpm
 
 The package is named `tmpmail-cli` (the desktop app's is `tmpmail`), so both install side by
 side. It puts `tmpmail` in `/usr/bin` with its man pages (`man tmpmail`) and the bash, zsh
-and fish completions, and needs nothing else. It doesn't update by itself: install the next
-version's file the same way.
+and fish completions. It runs on its own; two extras help: `xdg-utils` opens mail and links
+in the browser (recommended, so apt and dnf install it too unless you add
+`--no-install-recommends` or `--setopt=install_weak_deps=False`), and `wl-clipboard` or `xclip`
+lets `tmpmail copy` use the clipboard. It doesn't update by itself: install the next version's
+file the same way.
 
 #### Download on Linux
 
@@ -96,10 +99,17 @@ tar xzf tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz
 install -D -t ~/.local/bin tmpmail-0.3.6-x86_64-unknown-linux-musl/tmpmail
 ```
 
+If a new shell then says `tmpmail: command not found` (Arch, for one, doesn't put `~/.local/bin`
+on `PATH`), add that folder to `PATH` once: in bash, add
+`export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` (zsh: `~/.zshrc`); in fish, run
+`fish_add_path ~/.local/bin`.
+
 #### Check a download
 
 Each release has a `SHA256SUMS` file, and every file has a GitHub build attestation that
-proves it was built from this repository:
+proves it was built from this repository. Download `SHA256SUMS` next to the file and run
+`sha256sum -c --ignore-missing SHA256SUMS`, or check the attestation (this needs the GitHub
+CLI 2.49 or later, logged in with `gh auth login` or `GH_TOKEN` set):
 
 ```sh
 gh attestation verify tmpmail-0.3.6-x86_64-unknown-linux-musl.tar.gz --repo qorvyx/tmpmail \
@@ -174,7 +184,8 @@ says how to get past the warning.
   [How to remove everything](gui/README.md#removing-it).
 - **With the command-line tool:** use version 0.3.2 or later of it.
 - **Check a download:** each release has `SHA256SUMS` and build attestations
-  (`gh attestation verify FILE --repo qorvyx/tmpmail --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`).
+  (`gh attestation verify FILE --repo qorvyx/tmpmail --signer-workflow qorvyx/tmpmail/.github/workflows/gui-release.yml`;
+  GitHub CLI 2.49 or later, logged in).
 - **From source** (Rust 1.90+, Node 24, pnpm): `cd gui && pnpm install && pnpm tauri dev`.
 
 </details>

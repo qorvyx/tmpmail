@@ -27,9 +27,10 @@ cask "tmpmail-desktop" do
   homepage "$repo"
 
   # The app runs on 10.15+, but Homebrew itself needs 11 (Big Sur) or later
-  # (:catalina is no longer a symbol it knows). The keyword form loads in
-  # older brew versions too.
-  depends_on macos: ">= :big_sur"
+  # (:catalina is no longer a symbol it knows). Current Homebrew reads a bare
+  # symbol as a minimum and warns that the ">= :big_sur" string form is
+  # deprecated; to confirm on macOS (test campaign round 4).
+  depends_on macos: :big_sur
 
   app "tmpmail.app"
 

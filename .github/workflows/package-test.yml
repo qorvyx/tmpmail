@@ -84,7 +84,9 @@ jobs:
                 zypper --non-interactive install --allow-unsigned-rpm "./$FILE" man >/dev/null
                 remove() { zypper --non-interactive remove tmpmail-cli >/dev/null; }
               else
-                dnf install -y -q --setopt=tsflags= "./$FILE" man-db
+                # tsflags= keeps the docs; util-linux brings col, which man
+                # needs to print to a pipe (the image has only util-linux-core).
+                dnf install -y -q --setopt=tsflags= "./$FILE" man-db util-linux
                 remove() { dnf remove -y -q tmpmail-cli; }
               fi
               zsh_dir=/usr/share/zsh/site-functions ;;

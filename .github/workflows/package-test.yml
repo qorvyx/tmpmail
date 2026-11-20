@@ -90,7 +90,8 @@ jobs:
               zsh_dir=/usr/share/zsh/site-functions ;;
           esac
           echo "== $(uname -m), $(. /etc/os-release; echo "$PRETTY_NAME")"
-          [ "$(command -v tmpmail)" = /usr/bin/tmpmail ]
+          # Resolved: where /usr/sbin links to /usr/bin (Fedora), command -v finds it first.
+          [ "$(readlink -f "$(command -v tmpmail)")" = /usr/bin/tmpmail ]
           tmpmail --version
           tmpmail --version | grep -qxF "tmpmail $VERSION"
           tmpmail --help >/dev/null

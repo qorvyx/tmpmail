@@ -2,7 +2,7 @@
 name = "tmpmail"
 version = "0.3.7"
 edition = "2024"
-description = "Disposable email from the terminal and a desktop app: make an address, get the verification code back."
+description = "Disposable email in one command: make an address, get the verification code back."
 license = "GPL-3.0-or-later"
 rust-version = "1.88"
 repository = "https://github.com/qorvyx/tmpmail"

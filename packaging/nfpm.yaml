@@ -20,7 +20,7 @@ vendor: qorvyx
 homepage: https://github.com/qorvyx/tmpmail
 license: GPL-3.0-or-later
 description: |-
-  Disposable email from the terminal: make an address, get the code back
+  Disposable email in one command: make an address, get the code back
   The tmpmail command-line tool, with its full-screen view and MCP server for
   AI agents. It is one static program with nothing else to install. The
   desktop app is the separate `tmpmail` package; both share the same inboxes.

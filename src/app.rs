@@ -442,10 +442,10 @@ impl App {
         };
         // A list number first: Guerrilla's welcome mail has the id "1", and
         // `read 1` must still mean the newest message.
-        if let Ok(n) = id.parse::<usize>() {
-            if (1..=list.len()).contains(&n) {
-                return Ok(list[n - 1].id.clone());
-            }
+        if let Ok(n) = id.parse::<usize>()
+            && (1..=list.len()).contains(&n)
+        {
+            return Ok(list[n - 1].id.clone());
         }
         if list.iter().any(|s| s.id == id) {
             return Ok(id.to_string());

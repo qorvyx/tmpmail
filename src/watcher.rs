@@ -319,13 +319,13 @@ impl Watcher {
             return false;
         };
         let mut inbox = self.app.state.inboxes[n].clone();
-        if let Ok(p) = crate::provider::get(&inbox.provider) {
-            if let Err(e) = p.delete_inbox(&mut inbox) {
-                warn(
-                    "could not delete it at the provider, forgetting it locally",
-                    e,
-                );
-            }
+        if let Ok(p) = crate::provider::get(&inbox.provider)
+            && let Err(e) = p.delete_inbox(&mut inbox)
+        {
+            warn(
+                "could not delete it at the provider, forgetting it locally",
+                e,
+            );
         }
         if let Err(e) = self.app.forget(address) {
             warn("could not forget the inbox", e);

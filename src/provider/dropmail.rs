@@ -57,10 +57,8 @@ impl DropMail {
         if let Ok(t) = std::env::var("TMPMAIL_DROPMAIL_TOKEN") {
             return Ok(t);
         }
-        if !refresh {
-            if let Some(t) = self.cached_token() {
-                return Ok(t);
-            }
+        if !refresh && let Some(t) = self.cached_token() {
+            return Ok(t);
         }
         let token = self.new_token()?;
         if let Some(path) = &self.cache {
@@ -170,12 +168,11 @@ impl DropMail {
 
     fn find_mail(&self, inbox: &mut Inbox, id: &str) -> Result<Value> {
         // Mails never change, so one seen in the last listing is current.
-        if let Some((address, mails)) = &*self.last_mails.borrow() {
-            if *address == inbox.address {
-                if let Some(m) = mails.iter().find(|m| str_field(m, "id") == id) {
-                    return Ok(m.clone());
-                }
-            }
+        if let Some((address, mails)) = &*self.last_mails.borrow()
+            && *address == inbox.address
+            && let Some(m) = mails.iter().find(|m| str_field(m, "id") == id)
+        {
+            return Ok(m.clone());
         }
         self.mails(inbox)?
             .into_iter()

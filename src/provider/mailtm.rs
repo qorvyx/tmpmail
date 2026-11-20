@@ -472,10 +472,10 @@ impl Provider for MailTm {
         }
         self.whole_bodies(inbox, &mut msg);
         // After the check for a cut body, which goes by mail.tm's length.
-        if let Some(html) = &msg.html {
-            if let Cow::Owned(rewritten) = attachment_srcs_as_cids(html, &msg.attachments) {
-                msg.html = Some(rewritten);
-            }
+        if let Some(html) = &msg.html
+            && let Cow::Owned(rewritten) = attachment_srcs_as_cids(html, &msg.attachments)
+        {
+            msg.html = Some(rewritten);
         }
         Ok(msg)
     }

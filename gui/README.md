@@ -333,7 +333,7 @@ script, and Rust picks the colors when it builds the document:
 
 ## Setup
 
-- Rust 1.90 or newer (the root CLI crate still builds with 1.85).
+- Rust 1.90 or newer (the root CLI crate still builds with 1.88).
 - Node 24, and pnpm through corepack: `corepack enable --install-directory ~/.local/bin pnpm`
   (user-level), or prefix every command with `corepack`.
 - Linux: WebKitGTK 4.1 and friends. Debian/Ubuntu:

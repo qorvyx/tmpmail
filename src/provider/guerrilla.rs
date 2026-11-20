@@ -68,23 +68,23 @@ impl Guerrilla {
         let mut all = vec![("sid_token", sid.as_str())];
         all.extend_from_slice(params);
         let v = self.call(f, &all)?;
-        if let Some(new_sid) = v.get("sid_token").and_then(Value::as_str) {
-            if new_sid != sid {
-                inbox.set_cred("sid_token", new_sid.to_string());
-                let user = inbox.local_part().to_string();
-                self.call(
-                    "set_email_user",
-                    &[
-                        ("sid_token", new_sid),
-                        ("email_user", &user),
-                        ("lang", "en"),
-                    ],
-                )?;
-                // The first call ran against an empty session; repeat it.
-                let mut again = vec![("sid_token", new_sid)];
-                again.extend_from_slice(params);
-                return self.call(f, &again);
-            }
+        if let Some(new_sid) = v.get("sid_token").and_then(Value::as_str)
+            && new_sid != sid
+        {
+            inbox.set_cred("sid_token", new_sid.to_string());
+            let user = inbox.local_part().to_string();
+            self.call(
+                "set_email_user",
+                &[
+                    ("sid_token", new_sid),
+                    ("email_user", &user),
+                    ("lang", "en"),
+                ],
+            )?;
+            // The first call ran against an empty session; repeat it.
+            let mut again = vec![("sid_token", new_sid)];
+            again.extend_from_slice(params);
+            return self.call(f, &again);
         }
         Ok(v)
     }
@@ -223,10 +223,10 @@ impl Provider for Guerrilla {
     }
 
     fn create(&self, opts: &CreateOpts) -> Result<Inbox> {
-        if let Some(d) = &opts.domain {
-            if !DOMAINS.contains(&d.as_str()) {
-                return Err(domain_unavailable(self.id(), d, &self.domains()?));
-            }
+        if let Some(d) = &opts.domain
+            && !DOMAINS.contains(&d.as_str())
+        {
+            return Err(domain_unavailable(self.id(), d, &self.domains()?));
         }
         let mut v = self.call("get_email_address", &[("lang", "en")])?;
         let sid = str_field(&v, "sid_token").to_string();

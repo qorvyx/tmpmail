@@ -306,12 +306,11 @@ pub fn term_size() -> Option<(usize, usize)> {
     use std::io::IsTerminal;
     // crossterm asks the terminal itself (/dev/tty, or the Windows console),
     // so only trust it when stdout is that terminal.
-    if std::io::stdout().is_terminal() {
-        if let Ok((cols, rows)) = ratatui::crossterm::terminal::size() {
-            if cols > 0 {
-                return Some((cols as usize, rows as usize));
-            }
-        }
+    if std::io::stdout().is_terminal()
+        && let Ok((cols, rows)) = ratatui::crossterm::terminal::size()
+        && cols > 0
+    {
+        return Some((cols as usize, rows as usize));
     }
     let env = |key: &str| std::env::var(key).ok()?.parse::<usize>().ok();
     Some((env("COLUMNS")?, env("LINES").unwrap_or(0)))

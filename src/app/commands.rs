@@ -846,22 +846,22 @@ impl App {
             self.targets_label(&targets)
         ));
         loop {
-            if let (Some(at), Some(every)) = (rotate_at, a.rotate) {
-                if Instant::now() >= at {
-                    rotate_at = Some(match self.watch_rotate(&a, &mut poller) {
-                        Ok(n) => {
-                            targets = vec![n];
-                            // Indexes moved; the new inbox has nothing seen.
-                            seen.clear();
-                            failing.clear();
-                            Instant::now() + every
-                        }
-                        Err(e) => {
-                            self.warn(&format!("could not rotate ({e}); retrying in a minute"));
-                            Instant::now() + Duration::from_secs(60)
-                        }
-                    });
-                }
+            if let (Some(at), Some(every)) = (rotate_at, a.rotate)
+                && Instant::now() >= at
+            {
+                rotate_at = Some(match self.watch_rotate(&a, &mut poller) {
+                    Ok(n) => {
+                        targets = vec![n];
+                        // Indexes moved; the new inbox has nothing seen.
+                        seen.clear();
+                        failing.clear();
+                        Instant::now() + every
+                    }
+                    Err(e) => {
+                        self.warn(&format!("could not rotate ({e}); retrying in a minute"));
+                        Instant::now() + Duration::from_secs(60)
+                    }
+                });
             }
             for n in targets.clone() {
                 if !poller.is_due(&self.state.inboxes[n].address) {

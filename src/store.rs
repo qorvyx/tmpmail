@@ -219,10 +219,10 @@ impl State {
                 ))),
             };
         }
-        if let Some(active) = &self.active {
-            if let Some(n) = self.find(active) {
-                return Ok(n);
-            }
+        if let Some(active) = &self.active
+            && let Some(n) = self.find(active)
+        {
+            return Ok(n);
         }
         if self.inboxes.is_empty() {
             return Err(Error::NoInbox);

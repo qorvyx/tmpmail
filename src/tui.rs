@@ -384,14 +384,13 @@ impl Ui {
             terminal
                 .draw(|f| self.draw(f))
                 .map_err(anyhow::Error::from)?;
-            if event::poll(Duration::from_millis(150)).map_err(anyhow::Error::from)? {
-                if let Event::Key(key) = event::read().map_err(anyhow::Error::from)? {
-                    if key.kind == KeyEventKind::Press {
-                        self.key(key, app);
-                        if self.focus == Focus::Preview {
-                            self.mark_shown_read();
-                        }
-                    }
+            if event::poll(Duration::from_millis(150)).map_err(anyhow::Error::from)?
+                && let Event::Key(key) = event::read().map_err(anyhow::Error::from)?
+                && key.kind == KeyEventKind::Press
+            {
+                self.key(key, app);
+                if self.focus == Focus::Preview {
+                    self.mark_shown_read();
                 }
             }
             for ev in events.try_iter() {
@@ -467,10 +466,10 @@ impl Ui {
                 if n != self.inbox_state.selected() || self.inbox().is_none() {
                     self.select_inbox(n);
                 }
-                if let Some(a) = &self.pending_select {
-                    if self.inboxes.iter().any(|i| &i.address == a) {
-                        self.pending_select = None;
-                    }
+                if let Some(a) = &self.pending_select
+                    && self.inboxes.iter().any(|i| &i.address == a)
+                {
+                    self.pending_select = None;
                 }
             }
             Ev::Created(address) => {
@@ -889,7 +888,7 @@ impl Ui {
         };
         match self.focus {
             Focus::Inboxes => {
-                let mut state = self.inbox_state.clone();
+                let mut state = self.inbox_state;
                 move_in(&mut state, self.inboxes.len());
                 if state.selected() != self.inbox_state.selected() {
                     self.select_inbox(state.selected());

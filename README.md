@@ -37,6 +37,8 @@ tmpmail otp --wait --include-existing    # waits for the mail, then prints 48291
 - **Safe by default:** HTML mail is cleaned, remote images (trackers) are blocked, and
   hidden characters can't change your terminal.
 - **One small program** with nothing else to install, and verifiable builds.
+- **An independent rewrite of the original tmpmail** shell script, whose only service shut down;
+  [its old flags still work](#coming-from-the-original-tmpmail).
 
 ## Contents
 
@@ -81,7 +83,9 @@ tmpmail otp --wait --include-existing    # waits for the mail, then prints 48291
   </details>
 - ⚠️ **[When not to use tmpmail](#when-not-to-use-tmpmail)**
 - 🔒 **[Privacy and security](#privacy-and-security)**
+- 🛠️ **[Development](#development)**
 - 🤝 **[Contributing](#contributing)**
+- 📝 **[To do](#to-do)**
 
 ## Install
 
@@ -569,7 +573,7 @@ characters, shortens very long fields and marks mail as `untrusted_content`.
 
 [sdushantha/tmpmail](https://github.com/sdushantha/tmpmail) was a shell script whose only
 service, 1secmail, has shut down. This is a rewrite, and its old flags still work:
-`tmpmail -g [ADDR]`, `tmpmail`, `tmpmail -r`, `tmpmail ID`, `-d`, `-c`, `-t`.
+`tmpmail -g [ADDR]`, `tmpmail`, `tmpmail -r`, `tmpmail ID`, `-d`, `-c`, `-t`, `-b BROWSER`.
 [How the old flags map](docs/usage.md#original-tmpmail-flags).
 
 ## Providers
@@ -716,6 +720,16 @@ parts. Its API isn't stable yet. The desktop app is in [`gui/`](gui/README.md), 
 
 Bug reports, ideas and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 To report a security problem privately, see [SECURITY.md](SECURITY.md).
+
+## To do
+
+- [ ] Windows: Scoop and winget packages, so the command-line tool installs in one command
+- [ ] Arch: an AUR package (under another name: `tmpmail` there is the original script)
+- [ ] The desktop app on Flathub
+- [ ] A Nix package
+- [ ] The desktop app for arm64 Linux
+
+Want to help with one? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
